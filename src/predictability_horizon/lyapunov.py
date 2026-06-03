@@ -17,14 +17,16 @@ def lyapunov_spectrum(
     traj: npt.NDArray[np.float64],
     dt: float,
     k: int | None = None,
+    seed: int = 0,
 ) -> LyapunovResult:
     """Top-k Lyapunov exponents (per unit time) via tangent-space QR.
 
     traj: (N+1, dim) states. jacobian_fn(state) -> (dim, dim) discrete Jacobian.
+    seed: RNG seed for the initial QR orthonormal frame (default 0, backward-compatible).
     """
     n = traj.shape[1]
     k = n if k is None else k
-    Q = np.linalg.qr(np.random.default_rng(0).standard_normal((n, k)))[0]  # noqa: N806
+    Q = np.linalg.qr(np.random.default_rng(seed).standard_normal((n, k)))[0]  # noqa: N806
     log_sum = np.zeros(k)
     steps = traj.shape[0] - 1
     for t in range(steps):
