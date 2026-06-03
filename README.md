@@ -11,7 +11,9 @@ and this repo measures both on differentiable robot-learning systems built in
 e^{λ₁T} (one factor of λ₁). So analytic simulator gradients are usable only for
 horizons T ≲ 1/λ₁. Verified to machine precision on a linear map; on the chaotic
 acrobot the measured gradient-gain rate is consistent with the independently-measured
-λ₁ to within finite-time scatter.
+λ₁ to within finite-time scatter. A sweep across regimes (pendulum + acrobot energies)
+confirms the slope tracks λ₁ with correlation 0.99 (Fig. 5), and the T ≲ 1/λ₁ horizon
+is demonstrated directly via the analytic-gradient SNR (Fig. 6).
 
 **Part B — learned world models.** A small MLP world model reproduces an integrable
 system's near-zero Lyapunov exponent but **over-amplifies the chaotic one** (its learned
@@ -51,7 +53,7 @@ print("lambda_1 * dt        /step:", r.lambda1_per_step)
 
 ```bash
 predictability-horizon systems           # list the registered dynamical systems
-predictability-horizon reproduce         # regenerate all four figures (trains world models; a few minutes)
+predictability-horizon reproduce         # regenerate all six figures (world models + Part-A sweeps; ~15 min)
 predictability-horizon reproduce --out path/to/output_dir
 ```
 
@@ -74,6 +76,8 @@ pytest -q                        # full suite (20+ min; world-model training tes
 | `writeup/figures/fig2.png` | Cartpole swing-up loss curve via differentiable simulation |
 | `writeup/figures/fig3.png` | World-model prediction-error growth, integrable vs chaotic |
 | `writeup/figures/fig4.png` | Learned vs true λ₁ — the surrogate over-amplifies the chaotic exponent |
+| `writeup/figures/fig5.png` | Gradient-gain slope vs λ₁ across regimes (pendulum + acrobot energy sweep) — points track y=x, corr 0.99 |
+| `writeup/figures/fig6.png` | Analytic-gradient SNR vs Lyapunov time T·λ₁ — degrades through the predictability horizon |
 
 ## Systems
 
