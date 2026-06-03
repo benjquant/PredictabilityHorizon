@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: "PredictabilityHorizon: Lyapunov Exponents as Predictability Diagnostics for Differentiable Simulators and Learned World Models"
+authors:
+  - family-names: Strittmatter
+    given-names: Benjamin
+version: 0.0.1
+date-released: 2026-06-02
+url: "https://github.com/benjquant/PredictabilityHorizon"
+license: MIT

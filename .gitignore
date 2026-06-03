@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Virtualenv
+.venv/
+
+# Caches
+.cache/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Local planning & private files — NOT for the public repo
+.claude/
+NVIDIA.tex
+notes/
+docs/
