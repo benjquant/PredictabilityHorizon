@@ -58,9 +58,10 @@ def gradient_snr_vs_horizon(
     For each horizon T (in integration *steps*), perturb x0 by N(0, eps) over n_ic
     samples, take the gradient via grad_loss_wrt_x0, and report
     SNR = ||mean gradient|| / mean(||g - mean||). In a chaotic system the gradient
-    directions decorrelate across nearby ICs, so the SNR collapses once the horizon
-    reaches the predictability limit — at a step count ≈ 1/(λ₁·dt), i.e. Lyapunov time
-    T·dt·λ₁ ≈ 1. The returned x-axis is in steps; callers convert to Lyapunov time by
+    directions decorrelate across nearby ICs, so the SNR declines steadily as the horizon
+    approaches the predictability limit T·dt·λ₁ ≈ 1 (an order-of-magnitude scale: the exact
+    SNR=1 crossover carries a log(1/eps) factor, ~log(1/eps)/(λ₁·dt) steps). The returned
+    x-axis is in steps; callers convert to Lyapunov time by
     multiplying by ``dt`` and the per-time λ₁. (For a *linear* map the e^{λ₁T} factor
     cancels between signal and noise, so the SNR is flat — the collapse is a genuinely
     nonlinear effect.)

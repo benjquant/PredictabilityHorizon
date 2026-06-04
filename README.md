@@ -20,6 +20,9 @@ system's near-zero Lyapunov exponent but **over-amplifies the chaotic one** (its
 λ₁ is ill-conditioned) — because a next-step-accuracy objective does not constrain the
 Jacobian/sensitivity structure (the learned dynamics break volume-preservation). A
 cautionary result for certifying the physical fidelity of large world models (e.g. Cosmos).
+Enforcing the conservation structure helps: a symplectic Hamiltonian world model preserves
+phase-space volume by construction and recovers λ₁ far closer to true than the plain or
+soft-penalized MLP (Fig. 7) — turning the cautionary finding constructive.
 
 See `writeup/note.md` for the full method, results, and honest limitations.
 
@@ -53,7 +56,7 @@ print("lambda_1 * dt        /step:", r.lambda1_per_step)
 
 ```bash
 predictability-horizon systems           # list the registered dynamical systems
-predictability-horizon reproduce         # regenerate all six figures (world models + Part-A sweeps; ~15 min)
+predictability-horizon reproduce         # regenerate all seven figures (world models + Part-A sweeps + structured-model comparison; ~35 min)
 predictability-horizon reproduce --out path/to/output_dir
 ```
 
@@ -78,6 +81,7 @@ pytest -q                        # full suite (20+ min; world-model training tes
 | `writeup/figures/fig4.png` | Learned vs true λ₁ — the surrogate over-amplifies the chaotic exponent |
 | `writeup/figures/fig5.png` | Gradient-gain slope vs λ₁ across regimes (pendulum + acrobot energy sweep) — points track y=x, corr 0.99 |
 | `writeup/figures/fig6.png` | Analytic-gradient SNR vs Lyapunov time T·λ₁ — degrades through the predictability horizon |
+| `writeup/figures/fig7.png` | Learned λ₁ vs true for plain MLP, volume-penalty MLP, and symplectic HNN — only the hard structural constraint recovers it |
 
 ## Systems
 
