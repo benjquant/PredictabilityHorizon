@@ -61,7 +61,7 @@ disable_error_code = ["no-untyped-call", "no-any-return"]
 # torch ships py.typed but several nn.Module methods (backward, tensor ops that
 # return Any) are untyped; suppress the same two codes for worldmodel only.
 [[tool.mypy.overrides]]
-module = ["predictability_horizon.worldmodel"]
+module = ["predictability_horizon.worldmodel", "predictability_horizon.structured_models"]
 disable_error_code = ["no-untyped-call", "no-any-return"]
 
 [tool.pytest.ini_options]
