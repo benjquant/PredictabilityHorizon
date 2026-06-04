@@ -29,3 +29,10 @@ def test_fig5_fig6_written(tmp_path: Path):
     p6 = make_fig6_gradient_horizon(out=tmp_path / "fig6.png", fast=True)
     assert p5.exists() and p5.stat().st_size > 0
     assert p6.exists() and p6.stat().st_size > 0
+
+
+def test_fig7_written(tmp_path: Path):
+    from predictability_horizon.viz import make_fig7_structured_spectrum
+
+    p7 = make_fig7_structured_spectrum(out=tmp_path / "fig7.png", fast=True)
+    assert p7.exists() and p7.stat().st_size > 0

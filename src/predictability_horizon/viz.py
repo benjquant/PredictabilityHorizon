@@ -466,3 +466,81 @@ def make_fig6_gradient_horizon(out: Path, fast: bool = False) -> Path:
         [f"{(h * s.suggested_dt * lam):.2f}:{v:.1f}" for h, v in zip(horizons, snr, strict=True)],
     )
     return out
+
+
+def make_fig7_structured_spectrum(out: Path, fast: bool = False) -> Path:
+    """Learned λ₁ vs the true acrobot exponent for the plain MLP, the volume-penalty MLP,
+    and the symplectic HNN.
+
+    λ₁ is coordinate-invariant, so the HNN (a canonical (q,p) map, measured along the
+    canonical image p=M(θ)ω of the true orbit) is directly comparable to the (θ,ω)-space
+    models and the true system. Only the hard symplectic constraint (HNN) brings λ₁ close
+    to true; the unconstrained MLP and the soft volume-penalty MLP over-amplify it. The
+    HNN is volume-preserving by construction (canonical det J = 1; the spectrum sum ≈ 0 is
+    verified in test_structured_models) — the structural reason it does not over-amplify.
+    We compare λ₁ (the coordinate-invariant exponent) rather than the spectrum sum, which
+    is coordinate-dependent and finite-time-noisy across these heterogeneous models.
+    """
+    from predictability_horizon.structured_models import (
+        hnn_spectrum_on_traj,
+        train_hnn,
+        train_volume_penalty_mlp,
+    )
+    from predictability_horizon.worldmodel import (
+        make_dataset,
+        model_lyapunov_on_traj,
+        train_world_model,
+    )
+
+    s = SYSTEMS["acrobot"]
+    n_traj = 20 if fast else 80
+    t_data = 400 if fast else 2000
+    epochs = 15 if fast else 120
+    hnn_epochs = 15 if fast else 200
+    t_meas = 800 if fast else 12000
+    x0 = np.array([2.5, 0.0, 0.0, 0.0])
+
+    ds = make_dataset(s, n_traj=n_traj, T=t_data, seed=0)
+    base = train_world_model(ds, epochs=epochs, seed=0)
+    pen = train_volume_penalty_mlp(ds, epochs=epochs, penalty=1.0, seed=0)
+    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=hnn_epochs, seed=0)
+
+    true_traj = rollout(
+        cast(wp.Kernel, s.step_kernel),
+        x0,
+        np.zeros(t_meas),
+        s.default_params,
+        s.suggested_dt,
+        t_meas,
+    )[t_meas // 10 :]
+
+    def true_jac(st: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return cast(
+            npt.NDArray[np.float64],
+            s.jacobian(st, 0.0, s.default_params, s.suggested_dt),
+        )
+
+    true_lam = lyapunov_spectrum(true_jac, true_traj, dt=s.suggested_dt, k=1).largest
+    base_lam = model_lyapunov_on_traj(base, true_traj, dt=s.suggested_dt, k=1)
+    pen_lam = model_lyapunov_on_traj(pen, true_traj, dt=s.suggested_dt, k=1)
+    hnn_lam = hnn_spectrum_on_traj(hnn, true_traj, dt=s.suggested_dt, k=1).largest
+
+    names = ["MLP\n(no structure)", "vol-penalty\nMLP (soft)", "HNN\n(symplectic)"]
+    lams = [base_lam, pen_lam, hnn_lam]
+    colors = ["#d62728", "#ff7f0e", "#2ca02c"]
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.5))
+    ax.bar(names, lams, color=colors)
+    ax.axhline(true_lam, color="k", ls="--", lw=1.3, label=rf"true $\lambda_1$ ≈ {true_lam:.2f}/s")
+    ax.set_ylabel(r"learned $\lambda_1$  (/s)")
+    ax.set_title("Only the symplectic HNN recovers the chaotic acrobot's λ₁", fontsize=11)
+    ax.legend(fontsize=9)
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(
+        f"FIG7 lambda1 (/s): true={true_lam:+.3f}  MLP={base_lam:+.3f}  "
+        f"penalty={pen_lam:+.3f}  HNN={hnn_lam:+.3f}"
+    )
+    return out
