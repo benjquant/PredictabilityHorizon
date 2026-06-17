@@ -27,3 +27,20 @@ build/
 NVIDIA.tex
 notes/
 docs/
+
+# Literature — papers kept for personal reference (copyright; NOT for the public repo)
+Literature/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+writeup/paper.pdf

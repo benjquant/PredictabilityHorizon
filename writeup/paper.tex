@@ -1,0 +1,92 @@
+\documentclass[11pt]{article}
+
+% --- Encoding & fonts ---
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+% --- Math ---
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% --- Tables & figures ---
+\usepackage{booktabs}
+\usepackage{graphicx}
+\graphicspath{{figures/}{writeup/figures/}{./}}
+
+% --- Layout ---
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+
+% --- Bibliography ---
+\usepackage[backend=biber, style=numeric, sorting=none]{biblatex}
+\addbibresource{paper.bib}
+
+% --- Hyperlinks (load late) ---
+\usepackage[hidelinks]{hyperref}
+
+% --- Convenience macros ---
+\newcommand{\lamone}{\lambda_1}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+
+\title{Lyapunov Exponents as Predictability Diagnostics\\
+for Differentiable Simulators and Learned World Models}
+\author{Benjamin Strittmatter}
+\date{June 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+% Written last (Day 6), once the sections are locked.
+\emph{Draft in progress.}
+\end{abstract}
+
+\section{Introduction}\label{sec:intro}
+% Day 1 -- my technical motivation + the two-pillar thesis: differentiable-simulator
+% gradients and learned world models both inherit the Lyapunov predictability bound.
+\emph{[To be written --- Day 1.]}
+
+\section{Setup and prior work}\label{sec:setup}
+% Day 1 -- differentiable simulation; Warp / Newton; the "curse of chaos"
+% (Parmas 2018, Metz 2021, Suh 2022).
+\emph{[To be written --- Day 1.]}
+
+\section{Method}\label{sec:method}
+
+\subsection{Systems}\label{sec:systems}
+% Day 2 -- pendulum / cartpole / acrobot as Warp kernels; semi-implicit Euler;
+% symplectic pendulum (det J = 1); acrobot mass matrix.
+\emph{[To be written --- Day 2.]}
+
+\subsection{Lyapunov spectrum}\label{sec:lyapunov}
+% Day 3 -- Benettin/QR estimator; Oseledets; calibration (harmonic oscillator, Lorenz);
+% per-step Jacobian autodiff cross-checks.
+\emph{[To be written --- Day 3.]}
+
+\subsection{Consistency of the two estimators}\label{sec:consistency}
+% Day 3/4 -- gradient-gain slope vs Benettin lambda_1 as two finite-T functionals.
+\emph{[To be written --- Day 3.]}
+
+\section{Part A --- gradient gain in differentiable simulators}\label{sec:partA}
+% Day 4 -- rollout Jacobian; norm ~ e^{lambda_1 T} (one factor); slope = lambda_1 on a
+% linear map; chaotic acrobot; swing-up (Fig 2); regime sweep (Fig 5); horizon-rule SNR (Fig 6).
+\emph{[To be written --- Day 4.]}
+
+\section{Part B --- predictability of learned world models}\label{sec:partB}
+% Day 5 -- MLP world model; prediction error (Fig 3); Lyapunov fidelity (Fig 4);
+% structure-preserving sequel (Fig 7): plain MLP / volume-penalty MLP / symplectic HNN.
+\emph{[To be written --- Day 5.]}
+
+\section{Extensions}\label{sec:extensions}
+% Day 6 -- Cosmos / world models; GR00T / action models; contact & stiff dynamics.
+\emph{[To be written --- Day 6.]}
+
+\section{Limitations}\label{sec:limitations}
+% Day 6 -- honest caveats (single seed, finite-time estimates, integrator dependence, ...).
+\emph{[To be written --- Day 6.]}
+
+\nocite{*}  % TEMP: render all refs in the skeleton; remove once inline \cite{} calls are in.
+\printbibliography
+
+\end{document}
