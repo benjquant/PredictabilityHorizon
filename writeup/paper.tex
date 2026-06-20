@@ -4,6 +4,7 @@
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
+\usepackage{xcolor}
 
 % --- Math ---
 \usepackage{amsmath}
@@ -17,6 +18,7 @@
 % --- Layout ---
 \usepackage[margin=1in]{geometry}
 \usepackage{microtype}
+\usepackage{parskip}  % block paragraphs: zero indent + small vertical gap between paragraphs
 
 % --- Bibliography ---
 \usepackage[backend=biber, style=numeric, sorting=none]{biblatex}
@@ -38,53 +40,317 @@ for Differentiable Simulators and Learned World Models}
 \maketitle
 
 \begin{abstract}
-% Written last (Day 6), once the sections are locked.
+% Written last, once the sections are locked.
 \emph{Draft in progress.}
 \end{abstract}
 
 \section{Introduction}\label{sec:intro}
-% Day 1 -- my technical motivation + the two-pillar thesis: differentiable-simulator
-% gradients and learned world models both inherit the Lyapunov predictability bound.
-\emph{[To be written --- Day 1.]}
+% WRITE LAST. Motivation + my technical hook; the two-pillar thesis (differentiable-simulator
+% gradients and learned world models both inherit the Lyapunov predictability bound); related
+% work (curse of chaos: Parmas 2018, Metz 2021, Suh 2022); contributions.
+\emph{[To be written last.]}
 
-\section{Setup and prior work}\label{sec:setup}
-% Day 1 -- differentiable simulation; Warp / Newton; the "curse of chaos"
-% (Parmas 2018, Metz 2021, Suh 2022).
-\emph{[To be written --- Day 1.]}
+\section{Background}\label{sec:background}
 
-\section{Method}\label{sec:method}
+\subsection{Lyapunov exponents and \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:bg-lyapunov}
+% Crystal clear: separation rate of nearby trajectories; the spectrum; lambda_1 = largest;
+% sign(lambda_1) -> chaos; 1/lambda_1 = Lyapunov (predictability) time; how it is computed in
+% principle (Benettin/QR: evolve a tangent frame, QR-orthonormalise, average log of R diagonals;
+% Oseledets guarantees convergence).
 
-\subsection{Systems}\label{sec:systems}
-% Day 2 -- pendulum / cartpole / acrobot as Warp kernels; semi-implicit Euler;
-% symplectic pendulum (det J = 1); acrobot mass matrix.
-\emph{[To be written --- Day 2.]}
 
-\subsection{Lyapunov spectrum}\label{sec:lyapunov}
-% Day 3 -- Benettin/QR estimator; Oseledets; calibration (harmonic oscillator, Lorenz);
-% per-step Jacobian autodiff cross-checks.
-\emph{[To be written --- Day 3.]}
+Chaos is a concept borrowed from information theory, which quantifies how inherently difficult it is to make predictions about the future of dynamical systems. Mathematically speaking, a hallmark of chaos is the exponential divergence of nearby trajectories:
 
-\subsection{Consistency of the two estimators}\label{sec:consistency}
-% Day 3/4 -- gradient-gain slope vs Benettin lambda_1 as two finite-T functionals.
-\emph{[To be written --- Day 3.]}
+\begin{equation}
+ x(t) - \tilde{x}(t) \sim e^{\lambda t}\;,
+\end{equation}
+where $\tilde x(t)=x(t)+\delta(t)$ is related to the original trajectory by a small pertubation $\delta(t)$.
+The exponential rate of growth is called the "Lyapunov exponent". Goal of this work is to demonstrate that the Lyapunov exponent plays an important role in characterising the predictability horizons in robotic learning. 
 
-\section{Part A --- gradient gain in differentiable simulators}\label{sec:partA}
-% Day 4 -- rollout Jacobian; norm ~ e^{lambda_1 T} (one factor); slope = lambda_1 on a
-% linear map; chaotic acrobot; swing-up (Fig 2); regime sweep (Fig 5); horizon-rule SNR (Fig 6).
-\emph{[To be written --- Day 4.]}
 
-\section{Part B --- predictability of learned world models}\label{sec:partB}
-% Day 5 -- MLP world model; prediction error (Fig 3); Lyapunov fidelity (Fig 4);
-% structure-preserving sequel (Fig 7): plain MLP / volume-penalty MLP / symplectic HNN.
-\emph{[To be written --- Day 5.]}
+To obtain a language that is more closely related to the robotics framework we want to study, it is advantageous to work in the tangent space picture. In practice, the trajectory $x(t)$ is determined by an ODE $\dot{x}=f(x)$, for some function $f(x(t))$. We can linearise the ODE for a perturbation $x+\delta$, and arrive at the expression
+\begin{equation}
+\dot{\delta}= D\!f(x)\,\delta\;, 
+\end{equation}
+with $D\!f(x)$ the Jacobian matrix.
+Mirroring the mechanics of a differentiable simulator, we discretise the flow with a fixed step $dt$. This gives a one-step map $x_{t+1}=F(x_t)$, whose linearisation propagates the perturbation by the one-step Jacobian $J_t$:
+\begin{equation}
+\delta_{t+1} = J_t \delta_t, \qquad J_t = \frac{\partial x_{t+1}}{\partial x_t}.
+\end{equation}
+
+Solving the discrete recursion gives $\delta_t = M_t\,\delta_0$, propagated by the \emph{rollout Jacobian}
+\begin{equation}
+M_t = \frac{\partial x_t}{\partial x_0} = \prod_{s<t} J_s ,
+\label{eq:rollout-jacobian}
+\end{equation}
+the fundamental matrix of the linearised flow. The \emph{largest Lyapunov exponent} is the asymptotic growth rate of a generic infinitesimal perturbation,
+\begin{equation}
+\boxed{\;\lambda_1 = \lim_{t\to\infty}\frac{1}{t}\,\ln\frac{\lVert M_t\,\delta_0\rVert}{\lVert\delta_0\rVert}\;},
+\label{eq:lambda1}
+\end{equation}
+a limit that exists for almost every initial condition by Oseledets' multiplicative ergodic theorem~\cite{oseledets1968multiplicative}. The order of limits matters---$\delta_0$ infinitesimal first, then $t\to\infty$---which is why the exponent is a property of the linearised flow rather than of two finite trajectories, whose separation saturates once it is no longer small. A positive $\lambda_1$ is the operational signature of chaos: an initial uncertainty $\varepsilon$ grows to order unity within the \emph{predictability} (or \emph{Lyapunov}) \emph{time} $\tau \sim \lambda_1^{-1}\ln(1/\varepsilon)$, so $1/\lambda_1$ sets the horizon beyond which the trajectory is effectively unpredictable. A central claim of this work is that the \emph{same} $\lambda_1$ governs the predictability horizon of both computational objects of modern robot learning---differentiable simulators (Part~A) and learned world models (Part~B).
+
+The perturbation directions that grow fastest are the leading singular vectors of $M_t$; its singular values $\sigma_i(M_t)\sim e^{\lambda_i t}$ define the full \emph{Lyapunov spectrum} $\lambda_1\ge\lambda_2\ge\dots\ge\lambda_n$. (Singular rather than eigenvalues: $M_t$ is non-normal, and a pure shear has unit eigenvalues yet still stretches space.) The sum of the spectrum measures the mean exponential growth of phase-space volume~\cite{eckmann1985ergodic},
+\begin{equation}
+\sum_{i=1}^{n}\lambda_i = \big\langle \nabla\!\cdot f\big\rangle = \frac{1}{dt}\,\big\langle \ln\lvert\det J\rvert\big\rangle,
+\label{eq:sum-rule}
+\end{equation}
+the time-averaged divergence of the flow. The systems we study are Hamiltonian, so Liouville's theorem gives $\nabla\!\cdot f = 0$ and the spectrum sums to zero: phase-space volume is conserved. This volume-preservation constraint is a structural fingerprint that a faithful model must reproduce---a theme we return to in Part~B (Section~\ref{sec:partB})---and serves throughout as a consistency check on the estimator.
+
+Forming $M_t$ explicitly is numerically hopeless: it over- or under-flows within a few thousand steps while every column collapses onto the dominant direction. We instead use the standard Benettin/QR estimator~\cite{benettin1980lyapunov,engelken2023lyapunov}: evolve an orthonormal frame $Q$ under the one-step Jacobians, re-orthonormalise at each step through a factorisation $J_t Q = Q'R$, and accumulate the logarithms of the diagonal entries of $R$; the running averages converge to the exponents $\lambda_i$ (reported per unit time, after dividing by $dt$), with convergence guaranteed by Oseledets. A single such estimator is used throughout, calibrated against known answers: it returns zero to machine precision on a harmonic oscillator and recovers $\lambda_1\approx 0.906$ for the Lorenz system, as detailed in Section~\ref{sec:m-lyapunov}.
+
+
+\subsection{Jacobians and differentiable simulation}\label{sec:bg-jacobian}
+% One-step Jacobian J_t = d x_{t+1}/d x_t; rollout Jacobian M_T = prod_t J_t = d x_T/d x_0; why it
+% is THE object a differentiable simulator backprops (system ID, trajectory optimisation, first-order
+% policy gradients all go through the rollout); the bridge ||M_T|| ~ e^{lambda_1 T}.
+
+A \emph{differentiable simulator} is a physics engine whose one-step map $x_{t+1}=F(x_t)$ is implemented so that derivatives propagate through it: applying reverse-mode automatic differentiation to a rollout returns the gradient of a trajectory objective with respect to the initial state, the physical parameters, or a sequence of control inputs. We use NVIDIA Warp~\cite{macklin2022warp} for every simulator in this work; the implementation details are deferred to Section~\ref{sec:m-warp}.
+
+The object such a simulator differentiates is exactly the rollout Jacobian of Section~\ref{sec:bg-lyapunov}. For a scalar loss $L(x_T)$ evaluated at the end of a $T$-step rollout, the chain rule gives
+\begin{equation}
+\frac{\partial L}{\partial x_0} = \frac{\partial L}{\partial x_T}\,M_T, \qquad M_T = \prod_{t<T} J_t,
+\label{eq:loss-grad}
+\end{equation}
+with $M_T$ the rollout Jacobian of Eq.~\eqref{eq:rollout-jacobian}. Reverse-mode differentiation evaluates this product right-to-left, multiplying in one $J_t$ per step as it walks back along the stored trajectory. Every gradient a differentiable simulator produces is therefore a product of one-step Jacobians---the same product that governs the growth of perturbations.
+
+This is not a peculiarity of one loss. The three canonical uses of a differentiable simulator all backpropagate through the rollout and so all carry the factor $M_T$: system identification differentiates the trajectory with respect to physical parameters, trajectory optimisation differentiates it with respect to a control sequence, and first-order (analytic) policy gradients differentiate it with respect to policy parameters~\cite{suh2022differentiable,parmas2018pipps}. In each case the gradient inherits whatever $M_T$ does.
+
+What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapunov exponent, Eq.~\eqref{eq:lambda1}, the rollout Jacobian stretches a generic vector as $\norm{M_T}\sim e^{\lambda_1 T}$, so on a chaotic system ($\lambda_1>0$) the gradient magnitude grows exponentially in the horizon. The useful signal does not grow with it: the exponentially large contributions come from the most sensitive directions and inflate both the gradient and its variance, so beyond $T\sim 1/\lambda_1$ the analytic gradient is dominated by chaotic amplification rather than by the quantity one meant to optimise~\cite{metz2021gradients,parmas2018pipps,suh2022differentiable}. This is the \emph{curse of chaos} for differentiable simulators, and it is the precise statement Part~A measures: the same $1/\lambda_1$ horizon that bounds prediction also bounds the useful length of a differentiable rollout.
+
+Equation~\eqref{eq:loss-grad} also gives a second, independent handle on $\lambda_1$. By Eq.~\eqref{eq:lambda1}, the growth rate of the gradient gain $\norm{M_T}$ with $T$ is itself a finite-horizon estimate of $\lambda_1$---distinct from the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov}, computed from the same orbit, and expected to agree with it as $T\to\infty$ by Oseledets. Section~\ref{sec:m-consistency} makes this comparison the basis of Part~A.
+
+\subsection{The three systems}\label{sec:bg-systems}
+% pendulum (integrable, lambda_1 = 0), cartpole (underactuated), acrobot (chaotic, lambda_1 > 0).
+% Characterised as ODE / Hamiltonian systems; separable vs non-separable Hamiltonian; discretised by
+% semi-implicit (symplectic) Euler.
+
+We study three mechanical systems that share a common structure but span the range of dynamical behaviour we care about. Each is a conservative Hamiltonian system: writing the state as a configuration $q$ with conjugate momentum $p$, the dynamics follow from a Hamiltonian
+\begin{equation}
+H(q,p) = \tfrac{1}{2}\,p^\top M(q)^{-1} p + V(q),
+\label{eq:hamiltonian}
+\end{equation}
+the sum of kinetic and potential energy, with $M(q)$ the configuration-dependent mass (inertia) matrix~\cite{arnold1989mathematical}. Equivalently, in second-order form the passive dynamics obey the manipulator equation $M(q)\ddot q + C(q,\dot q)\dot q + G(q) = 0$~\cite{tedrake2023underactuated}; control enters as a forcing term on the right, but our Lyapunov diagnostics concern the underlying conservative flow, for which Liouville's theorem applies and the spectrum sums to zero as in Section~\ref{sec:bg-lyapunov}.
+
+The three systems form a deliberate ladder in $\lambda_1$:
+\begin{itemize}
+\item \textbf{Pendulum} --- a single degree of freedom with separable Hamiltonian $H=\tfrac{1}{2}p^2 + V(\theta)$. A one-degree-of-freedom autonomous Hamiltonian is integrable: energy conservation confines every orbit to a level set of $H$, leaving no room for exponential divergence, so $\lambda_1=0$~\cite{arnold1989mathematical}. This is our ordered baseline.
+\item \textbf{Cartpole} --- a pole hinged on a translating cart: two degrees of freedom, underactuated. It is the canonical control benchmark~\cite{barto1983neuronlike,tedrake2023underactuated} and sits at intermediate complexity.
+\item \textbf{Acrobot} --- a two-link pendulum actuated only at the elbow, the textbook chaotic underactuated system~\cite{spong1995swing}. Its inertia matrix $M(q)$ depends on the configuration, making the Hamiltonian \emph{non-separable}, and its passive dynamics are chaotic, $\lambda_1>0$.
+\end{itemize}
+
+The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B.
+
+Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The cartpole's larger-step discretisation is not volume-preserving, and it enters only as the forced swing-up demonstration of Part~A, never in a Lyapunov claim. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the acrobot---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
+
+\section{Methods --- what we simulate and how}\label{sec:methods}
+
+\subsection{Differentiable Warp simulators}\label{sec:m-warp}
+% semi-implicit (symplectic) Euler step kernels; rollout stored as a (T+1, dim) tape (never
+% overwriting a cell) so reverse-mode adjoints through the trajectory are correct; CPU, single-thread.
+
+We implement each system of Section~\ref{sec:bg-systems} directly as a Warp~\cite{macklin2022warp}
+compute kernel that advances the state by one \emph{velocity-first semi-implicit (symplectic) Euler} step:
+the angular acceleration is evaluated at the current state, the velocity is updated first, and the
+configuration is then advanced with the \emph{new} velocity,
+\begin{equation}
+\omega_{t+1} = \omega_t + dt\,a(q_t,\omega_t), \qquad
+q_{t+1} = q_t + dt\,\omega_{t+1}.
+\label{eq:semi-implicit}
+\end{equation}
+For a single degree of freedom this map is exactly symplectic; for the non-separable acrobot it is
+symplectic to $O(dt^2)$ (Section~\ref{sec:bg-systems}). The accelerations $a$ are the only
+system-specific part:
+\begin{itemize}
+\item \textbf{Pendulum} (state $(\theta,\omega)$): $a = -(g/\ell)\sin\theta$.
+\item \textbf{Acrobot} (state $(\theta_1,\theta_2,\omega_1,\omega_2)$): the angular accelerations
+solve the manipulator equation $M(\theta)\,\dot\omega = F(\theta,\omega)$ with the point-mass
+double-pendulum inertia matrix and passive (Coriolis + gravity) forcing
+\begin{equation}
+M(\theta)=\begin{bmatrix} (m_1+m_2)\,l_1^2 & m_2 l_1 l_2 \cos(\theta_1-\theta_2)\\[2pt]
+m_2 l_1 l_2 \cos(\theta_1-\theta_2) & m_2 l_2^2 \end{bmatrix},\quad
+F=\begin{bmatrix} -m_2 l_1 l_2\,\omega_2^2 \sin(\theta_1-\theta_2) - (m_1+m_2)\,g l_1 \sin\theta_1\\[2pt]
+\phantom{-}m_2 l_1 l_2\,\omega_1^2 \sin(\theta_1-\theta_2) - m_2 g l_2 \sin\theta_2 \end{bmatrix}.
+\label{eq:acrobot-massmatrix}
+\end{equation}
+The kernel advances Eq.~\eqref{eq:semi-implicit} with $\dot\omega = M(\theta)^{-1}F$ in the closed
+form obtained by inverting the $2\times2$ system; we verified that this closed form reproduces
+$M(\theta)^{-1}F$ to machine precision. Because $M$ depends on $\theta$, the Hamiltonian is
+non-separable, which is the structural feature exploited in Part~B (Section~\ref{sec:partB}).
+\item \textbf{Cartpole} (state $(x,\theta,v,\omega)$): the uniform-rod
+benchmark~\cite{barto1983neuronlike,tedrake2023underactuated}, with
+\begin{equation}
+\ddot\theta = \frac{g\sin\theta - \cos\theta\,\big[(f + m_p \ell\,\omega^2\sin\theta)/(m_c+m_p)\big]}
+{\ell\big(\tfrac{4}{3} - m_p\cos^2\theta/(m_c+m_p)\big)}, \qquad
+\ddot x = \frac{f + m_p \ell\,\omega^2\sin\theta}{m_c+m_p} - \frac{m_p \ell\,\ddot\theta\cos\theta}{m_c+m_p},
+\end{equation}
+driven by the cart force $f$. The cartpole is used only as the trajectory-optimisation target of
+Part~A (the forced swing-up demonstration); over Lyapunov horizons its discretisation is
+\emph{not} volume-preserving (the measured mechanical energy drifts by $\approx 1.8\%$ over $20$
+steps at $dt = 0.02$), so it is excluded from all Lyapunov claims.
+\end{itemize}
+
+Reverse-mode differentiation requires the full trajectory to be available on the backward pass, so
+each rollout is stored as a $(T{+}1)\times\dim$ array, writing one new row per step and never
+overwriting a cell; the adjoint then walks back along the stored states, multiplying in one
+one-step Jacobian $J_t$ per step exactly as in Eq.~\eqref{eq:loss-grad}. All simulators run on CPU,
+single-threaded. The integration step and physical parameters are collected in
+Table~\ref{tab:sim-params}.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lll}
+\toprule
+System & $dt$ & Parameters \\
+\midrule
+Pendulum & $5\times10^{-3}$ & $g=9.81,\ \ell=1$ \\
+Cartpole & $2\times10^{-2}$ & $m_c=1,\ m_p=0.1,\ \ell=0.5,\ g=9.81$ \\
+Acrobot  & $5\times10^{-4}$ & $m_1=m_2=1,\ l_1=l_2=1,\ g=9.81$ \\
+\bottomrule
+\end{tabular}
+\caption{Integration step and physical parameters of the three Warp simulators.}
+\label{tab:sim-params}
+\end{table}
+
+\subsection{The Lyapunov estimator and its calibration}\label{sec:m-lyapunov}
+% Our single Benettin/QR estimator; calibration against known answers (harmonic oscillator 0;
+% Lorenz ~0.906); per-step Jacobian cross-checks (Warp autodiff vs analytic / finite-difference).
+
+We operationalize the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov} as follows. From a
+seeded random orthonormal frame $Q\in\mathbb{R}^{n\times k}$ (the $k$ leading exponents; $k=n$ for
+the full spectrum), we advance the tangent frame one step at a time, re-orthonormalising through a
+thin QR factorisation $J_t Q = Q'R$ at \emph{every} step, accumulating $\ln\lvert R_{ii}\rvert$, and
+dividing the running sums by the elapsed time $N\,dt$ to obtain the exponents in physical
+(per-unit-time) units, sorted in descending order (the telescoping that makes
+$\frac{1}{N\,dt}\sum_t \ln R^{(t)}_{ii}\to\lambda_i$ exact is spelled out in
+Appendix~\ref{app:qr}). The initial transient is discarded by slicing the trajectory before the average: for the dissipative
+Lorenz calibration this is the relaxation onto the strange attractor (the first $2000$ steps), and for
+every system it is the alignment of the QR frame onto the leading Oseledets directions
+(Section~\ref{sec:m-consistency}). A
+single such estimator is used for every result in this paper.
+
+We calibrate it against two systems with known answers.
+\begin{itemize}
+\item \textbf{Harmonic oscillator} (an exact rotation map, all exponents zero): the estimator
+returns $\lvert\lambda_i\rvert \lesssim 2\times10^{-15}$ over $2\times10^4$ steps---zero to machine
+precision, as expected since each step contributes $\ln\lvert{\pm}1\rvert = 0$ exactly.
+\item \textbf{Lorenz} ($\sigma=10,\ \rho=28,\ \beta=8/3$; RK4 at $dt=5\times10^{-3}$, first $2000$
+steps dropped): the finite-time largest exponent is itself a fluctuating quantity. Single-trajectory
+estimates scatter by $\sim\!0.02$ around the standard literature value $\lambda_1 = 0.9056$ over a
+few hundred Lyapunov times, and the running average on a long trajectory converges to it
+($\lambda_1 = 0.905$ at $1.6\times10^3$ Lyapunov times). This scatter is intrinsic finite-time
+variance, not a Jacobian or estimator bias: finite-difference and analytic (variational-RK4)
+Jacobians agree on $\lambda_1$ to $3\times10^{-8}$ along a common orbit. As a sharp structural check
+valid at \emph{every} horizon, the recovered spectrum has a near-zero middle exponent and sums to
+$\sum_i\lambda_i = -13.667$, matching the constant flow divergence
+$\operatorname{tr} Df = -(\sigma+1+\beta)$ to machine precision (Eq.~\eqref{eq:sum-rule}).
+\end{itemize}
+
+Finally, the per-step Jacobian feeding the estimator is computed analytically for the pendulum and
+by central finite differences for the acrobot, and each is cross-checked against a third, independent
+route---Warp's reverse-mode autodiff. The analytic pendulum Jacobian agrees with autodiff to
+$1.7\times10^{-9}$ and the central-difference acrobot Jacobian to $2.0\times10^{-5}$, confirming that
+the tangent dynamics the estimator integrates are the ones the simulator actually propagates.
+
+\subsection{Two estimators of \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:m-consistency}
+% gradient-gain slope (from the growth of ||M_T||) vs the Benettin lambda_1: two distinct finite-T
+% functionals of the SAME orbit, expected to agree as T -> infinity (Oseledets). Sets up Part A.
+
+Part~A rests on comparing two finite-horizon estimates of $\lambda_1$ computed from the \emph{same}
+orbit---one a property of the \emph{dynamics}, the other of the simulator's \emph{gradients}. The
+first is the Benettin/QR estimator of Section~\ref{sec:m-lyapunov}. The second reads
+$\lambda_1$ off the growth of the gradient gain introduced in Section~\ref{sec:bg-jacobian}: since
+$\norm{M_T}\sim e^{\lambda_1 T}$, the least-squares slope of $\ln\norm{M_T}_2$ against $T$ is itself
+an estimate of $\lambda_1$. Here $\norm{M_T}_2$ is the spectral norm (top singular value) of the
+rollout Jacobian, and the slope is fit over a range of horizons reaching several Lyapunov times
+($T$ from $\sim\!10^3$ up to $1.6\times10^4$ integration steps).
+
+These two numbers are distinct finite-$T$ functionals of the same Jacobian sequence, \emph{not}
+algebraically identical: the QR estimator averages the local logarithmic stretching of an
+orthonormal frame, whereas the slope tracks the global spectral norm of the accumulated product.
+Both converge to the true $\lambda_1$ as $T\to\infty$ by Oseledets' theorem, but only once
+$T \gg 1/(\lambda_1-\lambda_2)$---the time a generic direction needs to align with the leading one
+---and the slope is the higher-variance of the two. Part~A therefore reports their agreement as a
+\emph{consistency relation}---evidence that the gradient-gain growth rate and the dynamical
+$\lambda_1$ are one and the same number---rather than as an exact identity.
+
+\section{Part A --- \texorpdfstring{$\lambda_1$}{lambda1} bounds differentiable-simulator gradients}\label{sec:partA}
+% ||M_T|| ~ e^{lambda_1 T} (one factor); slope = lambda_1 (exact on a linear map; consistent on the
+% chaotic acrobot); regime sweep -> slope tracks lambda_1, corr 0.99 (Fig 5); the horizon T <~ 1/lambda_1
+% demonstrated via the analytic-gradient SNR (Fig 6); cartpole swing-up trajectory optimisation (Fig 2).
+\emph{[To be written.]}
+
+\section{Part B --- Lyapunov fidelity of learned world models}\label{sec:partB}
+% MLP world model; prediction-error growth (Fig 3, qualitative); learned vs true lambda_1 (Fig 4:
+% reproduces the integrable exponent, over-amplifies the chaotic one); mechanism (next-step MSE does
+% not constrain the Jacobian / breaks volume preservation); structure-preserving sequel (Fig 7):
+% plain MLP / volume-penalty MLP / symplectic HNN -- only the hard constraint recovers lambda_1.
+\emph{[To be written.]}
 
 \section{Extensions}\label{sec:extensions}
-% Day 6 -- Cosmos / world models; GR00T / action models; contact & stiff dynamics.
-\emph{[To be written --- Day 6.]}
+% Cosmos / world models; GR00T / action models; contact & stiff dynamics.
+\emph{[To be written.]}
 
 \section{Limitations}\label{sec:limitations}
-% Day 6 -- honest caveats (single seed, finite-time estimates, integrator dependence, ...).
-\emph{[To be written --- Day 6.]}
+% honest caveats (single seed, finite-time estimates, integrator/dt dependence, ...).
+\emph{[To be written.]}
+
+\appendix
+
+\section{The Benettin/QR estimator: telescoping and the log-sum}\label{app:qr}
+
+Sections~\ref{sec:bg-lyapunov} and~\ref{sec:m-lyapunov} assert that averaging the
+logarithms of the QR diagonals recovers the spectrum; we record here why, since the
+running sum is never formed explicitly in the main text.
+
+Let $J_0,\dots,J_{N-1}$ be the one-step Jacobians along an orbit and $Q^{(0)}\in
+\mathbb{R}^{n\times k}$ the initial orthonormal frame ($Q^{(0)\top}Q^{(0)}=I_k$). Each
+step performs a thin QR factorisation and feeds the resulting frame to the next step,
+\begin{equation}
+J_t\,Q^{(t)} = Q^{(t+1)}R^{(t+1)},\qquad t=0,\dots,N-1,
+\label{eq:qr-step}
+\end{equation}
+with $Q^{(t+1)}$ orthonormal-columned and $R^{(t+1)}$ upper triangular with positive
+diagonal. Substituting~\eqref{eq:qr-step} repeatedly telescopes the rollout Jacobian
+$M_N=\prod_{t<N}J_t$ acting on the initial frame,
+\begin{equation}
+M_N\,Q^{(0)} = J_{N-1}\cdots J_0\,Q^{(0)}
+= Q^{(N)}\,\underbrace{R^{(N)}R^{(N-1)}\cdots R^{(1)}}_{\displaystyle \mathcal{R}_N}.
+\label{eq:telescope}
+\end{equation}
+Equation~\eqref{eq:telescope} is itself a thin QR factorisation of $M_N Q^{(0)}$: the
+intermediate frames are not cancelled but carried forward as each step's input, and the
+entire accumulated rotation collects in the single factor $Q^{(N)}$. Two properties then
+isolate the spectrum.
+
+First, $\mathcal{R}_N$ is a product of upper-triangular matrices, hence upper triangular
+with diagonal equal to the product of diagonals,
+\begin{equation}
+(\mathcal{R}_N)_{ii}=\prod_{t=1}^{N} R^{(t)}_{ii}
+\qquad\Longrightarrow\qquad
+\ln(\mathcal{R}_N)_{ii}=\sum_{t=1}^{N}\ln R^{(t)}_{ii},
+\label{eq:logsum}
+\end{equation}
+converting the overflow-prone matrix product into the additive running sum the estimator
+accumulates---the entire numerical reason for re-orthonormalising at every step rather
+than forming $M_N$ once.
+
+Second, $Q^{(N)}$ has orthonormal columns and is therefore an isometry:
+$\norm{Q^{(N)}x}=\norm{x}$, its singular values are all one, $\norm{Q^{(N)}}=1$, and so
+$\sigma_i(M_N Q^{(0)})=\sigma_i(\mathcal{R}_N)$. It rotates the frame but neither
+stretches nor shrinks it, contributing nothing to any growth rate. Dividing
+\eqref{eq:logsum} by the elapsed physical time $N\,dt$ and letting $N\to\infty$ gives
+\begin{equation}
+\lambda_i=\lim_{N\to\infty}\frac{1}{N\,dt}\sum_{t=1}^{N}\ln R^{(t)}_{ii},
+\label{eq:lambda-logsum}
+\end{equation}
+with convergence guaranteed by Oseledets' theorem for a generic $Q^{(0)}$. ``Generic'' is
+what the seeded \emph{random} frame of Section~\ref{sec:m-lyapunov} secures: with
+probability one the columns of $Q^{(0)}$ avoid the measure-zero subspaces of the Oseledets
+filtration that grow more slowly than the top-$k$ rates, so~\eqref{eq:lambda-logsum}
+returns $\lambda_1\ge\cdots\ge\lambda_k$ rather than a slower set. That the \emph{diagonal}
+of $\mathcal{R}_N$ suffices---rather than its singular values---is exactly because the
+isometry $Q^{(N)}$ ties the two together.
 
 \nocite{*}  % TEMP: render all refs in the skeleton; remove once inline \cite{} calls are in.
 \printbibliography
