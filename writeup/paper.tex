@@ -278,7 +278,122 @@ $\lambda_1$ are one and the same number---rather than as an exact identity.
 % ||M_T|| ~ e^{lambda_1 T} (one factor); slope = lambda_1 (exact on a linear map; consistent on the
 % chaotic acrobot); regime sweep -> slope tracks lambda_1, corr 0.99 (Fig 5); the horizon T <~ 1/lambda_1
 % demonstrated via the analytic-gradient SNR (Fig 6); cartpole swing-up trajectory optimisation (Fig 2).
-\emph{[To be written.]}
+Part~A establishes the first pillar of the thesis: the largest Lyapunov exponent $\lambda_1$ governs
+the gradients a differentiable simulator produces. Section~\ref{sec:bg-jacobian} showed that every
+such gradient carries the rollout-Jacobian factor $M_T$ with $\norm{M_T}\sim e^{\lambda_1 T}$, and
+Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lambda_1$. We now
+(i) confirm the growth law and that its rate \emph{is} $\lambda_1$, (ii) show it holds across the
+integrable--chaotic range, (iii) turn the growth law into a \emph{usefulness} limit---the gradient
+predictability horizon $T\lesssim 1/\lambda_1$---and (iv) draw the consequence for trajectory
+optimisation.
+
+\subsection{The gradient-gain growth law}\label{sec:A-law}
+% slope of log||M_T|| = lambda_1; pendulum integrable (no blow-up) vs acrobot chaotic (e^{lambda_1 T}); Fig 1.
+This subsection operationalises the bridge of Section~\ref{sec:bg-jacobian}---that a differentiable
+simulator's gradient carries the factor $\norm{M_T}\sim e^{\lambda_1 T}$---and reads its rate off the
+slope estimator of Section~\ref{sec:m-consistency}. For each system we plot $\ln\norm{M_T}_2$ against
+the horizon $T$ (Fig.~\ref{fig:gradient-law}); the slope is the gradient-gain rate. On the chaotic
+acrobot the gain grows exponentially at $1.07\,\mathrm{s}^{-1}$, matching the independently measured
+Benettin $\lambda_1 = 1.18\,\mathrm{s}^{-1}$; on the integrable pendulum both rates vanish
+($\lambda_1\approx 0.08$, slope $\approx 0.06\,\mathrm{s}^{-1}$) and the gain is sub-exponential. The
+gradient gain thus blows up \emph{at the Lyapunov rate} on chaotic dynamics, and not at all on
+integrable ones.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=\linewidth]{fig1.png}
+  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$ (semilog).
+  Integrable pendulum (left): sub-exponential, $\lambda_1\approx 0$. Chaotic acrobot (right):
+  exponential growth whose log-slope ($1.07\,\mathrm{s}^{-1}$) matches the Benettin $\lambda_1$
+  ($1.18\,\mathrm{s}^{-1}$).}
+  \label{fig:gradient-law}
+\end{figure}
+
+Two points fix the interpretation. First, the rate is a \emph{single} factor of $\lambda_1$: we fit
+the Jacobian norm $\norm{M_T}_2$, which grows as $e^{\lambda_1 T}$, so its log-slope is $\lambda_1$;
+a squared quantity---a squared-loss objective, or the squared separation $\norm{\delta x_T}^2$---would
+grow as $e^{2\lambda_1 T}$ and read $2\lambda_1$ instead. Second, the coincidence of the two rates is
+the \emph{consistency relation} of Section~\ref{sec:m-consistency}, not an identity: slope and Benettin
+exponent are exact equals only for a constant-Jacobian map, and on the acrobot they agree to within the
+finite-time scatter of the higher-variance slope ($\approx 0.1\,\mathrm{s}^{-1}$, about $10\%$).
+
+\subsection{The law holds across regimes}\label{sec:A-regimes}
+% slope tracks Benettin lambda_1 across an acrobot energy sweep + pendulum, corr ~0.99; Fig 5.
+Section~\ref{sec:A-law} fixed the law on two orbits; here we vary the dynamics continuously. We sweep
+the acrobot across initial energies ($\theta_1$ from $0.5$ to $3.0$, raising $\lambda_1$ from near
+zero to $\sim\!1.2\,\mathrm{s}^{-1}$) and add the integrable pendulum, and for each we compare the
+gradient-gain slope against the Benettin $\lambda_1$ (Fig.~\ref{fig:slope-vs-lambda}). The points
+cluster on the line slope $=\lambda_1$: across the integrable-to-chaotic range the two rates correlate
+at $0.99$, with best-fit slope $0.96$ (ideal $1$) and near-zero intercept. The gradient-gain rate is
+thus $\lambda_1$ not merely on a single orbit but as a function of the regime.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.72\linewidth]{fig5.png}
+  \caption{Gradient-gain slope versus Benettin $\lambda_1$ across an acrobot energy sweep
+  ($\theta_1=0.5\!\to\!3.0$) and the pendulum; points cluster on $y=x$ (correlation $0.99$).
+  Horizontal bars are finite-time Lyapunov window scatter, not confidence intervals.}
+  \label{fig:slope-vs-lambda}
+\end{figure}
+
+The cartpole is deliberately absent: it is forced and not volume-preserving
+(Section~\ref{sec:bg-systems}), so its $\lambda_1$ is regime-dependent and ill-defined, and the
+acrobot energy sweep already spans the integrable-to-chaotic transition. The horizontal error bars
+report the finite-time scatter of the Benettin estimate over independent windows---an honest depiction
+of finite-time Lyapunov uncertainty, not a confidence interval on the plotted point.
+
+\subsection{The gradient predictability horizon}\label{sec:A-horizon}
+% analytic-gradient SNR collapses past T*lambda_1 ~ 1; genuine decorrelation; Fig 6.
+The growth law has a sharp operational consequence. Section~\ref{sec:bg-jacobian} argued that because
+$\norm{M_T}$ inflates both a gradient and its variance, beyond $T\sim 1/\lambda_1$ the analytic gradient
+of a differentiable rollout is dominated by chaotic amplification rather than by the objective---the
+\emph{curse of chaos}. We make this quantitative with a signal-to-noise ratio: perturbing the initial
+state over an ensemble of nearby conditions, we compare the mean analytic gradient
+$\nabla_{x_0}\norm{x_T}^2$ to its spread across the ensemble (Fig.~\ref{fig:gradient-horizon}). On the
+acrobot ($\lambda_1=1.23\,\mathrm{s}^{-1}$) the SNR is large well inside the horizon ($\approx\!170$ at
+$T\lambda_1\approx0.3$) and falls by roughly an order of magnitude past $T\lambda_1\approx1$ (to
+$\approx\!20$--$50$): the gradient still has a large magnitude, but its \emph{direction} is no longer
+shared across nearby initial conditions. The crossover sits at the predictability horizon
+$T\sim1/\lambda_1$, up to a logarithmic factor $\sim\log(1/\varepsilon)/(\lambda_1\,dt)$ set by the
+perturbation scale $\varepsilon$.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.75\linewidth]{fig6.png}
+  \caption{Analytic-gradient SNR versus Lyapunov time $T\lambda_1$ (acrobot). The SNR degrades past the
+  predictability horizon $T\lambda_1=1$ (dashed): the gradient's direction decorrelates across nearby
+  initial conditions even though its magnitude keeps growing.}
+  \label{fig:gradient-horizon}
+\end{figure}
+
+This collapse is genuinely nonlinear, not a normalisation artifact. Each ensemble gradient has
+magnitude $\sim\norm{M_T}\sim e^{\lambda_1 T}$, so the ensemble variance grows as $e^{2\lambda_1 T}$;
+on a purely linear map this common growth cancels between the mean (signal) and the spread (noise) and
+the SNR stays flat. The observed decline therefore measures real loss of \emph{directional} agreement
+among neighbouring trajectories: past $T\sim1/\lambda_1$ the analytic gradient points a different way
+for every nearby start, which is exactly what makes long differentiable rollouts unusable for
+first-order optimisation.
+
+\subsection{Consequence: optimisation through the simulator}\label{sec:A-consequence}
+% cartpole swing-up by gradient descent through the diff-sim; forced, excluded from lambda_1 claims; Fig 2.
+Sections~\ref{sec:A-law}--\ref{sec:A-horizon} measured how far a differentiable rollout's gradient
+stays usable; this last subsection shows the positive side of that boundary---that \emph{inside} the
+horizon the gradient is good enough to optimise through. We swing a cartpole from hanging to upright by
+gradient descent on the control sequence, backpropagating the upright-tracking cost through the
+differentiable Warp rollout (Adam, horizon $T=100$ steps; Fig.~\ref{fig:swingup}). The cost falls from
+$200.7$ to $57.9$ over $300$ iterations---the analytic gradient, taken over a horizon short enough to
+remain informative, solves the task.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.6\linewidth]{fig2.png}
+  \caption{Cartpole swing-up by gradient descent through the differentiable simulator: upright-tracking
+  cost versus optimisation iteration ($T=100$, Adam). The cartpole is forced and is excluded from all
+  $\lambda_1$ claims (Section~\ref{sec:bg-systems}).}
+  \label{fig:swingup}
+\end{figure}
+
+The cartpole appears only here, as an application: it is forced and not volume-preserving
+(Section~\ref{sec:bg-systems}), so it carries no Lyapunov claim. The point is not a number for this
+system but the converse of the curse of chaos---that the same gradient which becomes unusable past
+$T\sim1/\lambda_1$ is, within that horizon, exactly what makes differentiable simulation a powerful
+optimiser.
 
 \section{Part B --- Lyapunov fidelity of learned world models}\label{sec:partB}
 % MLP world model; prediction-error growth (Fig 3, qualitative); learned vs true lambda_1 (Fig 4:
