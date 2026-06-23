@@ -71,10 +71,11 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
 
     axes[0].set_ylabel(r"$\|\partial x_T/\partial x_0\|_2$")
     fig.suptitle(
-        r"Gradient gain $\|\partial x_T/\partial x_0\|$ blows up exponentially at $\lambda_1$"
-        " for chaotic dynamics (acrobot), but not for integrable dynamics (pendulum)"
+        r"Gradient gain $\|\partial x_T/\partial x_0\|_2$ blows up at rate $\lambda_1$:"
+        "\nexponential for the chaotic acrobot, sub-exponential for the integrable pendulum",
+        fontsize=10,
     )
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.90))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
     plt.close(fig)
