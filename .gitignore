@@ -43,4 +43,5 @@ Literature/
 *.run.xml
 *.synctex.gz
 *.toc
-writeup/paper.pdf
+
+# writeup/paper.pdf is intentionally tracked (shareable draft artifact)

@@ -44,6 +44,8 @@ for Differentiable Simulators and Learned World Models}
 \emph{Draft in progress.}
 \end{abstract}
 
+\tableofcontents
+\newpage
 \section{Introduction}\label{sec:intro}
 % WRITE LAST. Motivation + my technical hook; the two-pillar thesis (differentiable-simulator
 % gradients and learned world models both inherit the Lyapunov predictability bound); related
@@ -97,7 +99,7 @@ The perturbation directions that grow fastest are the leading singular vectors o
 \end{equation}
 the time-averaged divergence of the flow. The systems we study are Hamiltonian, so Liouville's theorem gives $\nabla\!\cdot f = 0$ and the spectrum sums to zero: phase-space volume is conserved. This volume-preservation constraint is a structural fingerprint that a faithful model must reproduce---a theme we return to in Part~B (Section~\ref{sec:partB})---and serves throughout as a consistency check on the estimator.
 
-Forming $M_t$ explicitly is numerically hopeless: it over- or under-flows within a few thousand steps while every column collapses onto the dominant direction. We instead use the standard Benettin/QR estimator~\cite{benettin1980lyapunov,engelken2023lyapunov}: evolve an orthonormal frame $Q$ under the one-step Jacobians, re-orthonormalise at each step through a factorisation $J_t Q = Q'R$, and accumulate the logarithms of the diagonal entries of $R$; the running averages converge to the exponents $\lambda_i$ (reported per unit time, after dividing by $dt$), with convergence guaranteed by Oseledets. A single such estimator is used throughout, calibrated against known answers: it returns zero to machine precision on a harmonic oscillator and recovers $\lambda_1\approx 0.906$ for the Lorenz system, as detailed in Section~\ref{sec:m-lyapunov}.
+Reading the \emph{full spectrum} off an explicitly formed $M_t$ is numerically hopeless: the dynamic range $\sigma_1/\sigma_n\sim e^{(\lambda_1-\lambda_n)t}$ over- or under-flows and every column collapses onto the dominant direction, burying the sub-dominant exponents within a few thousand steps. We instead use the standard Benettin/QR estimator~\cite{benettin1980lyapunov,engelken2023lyapunov}: evolve an orthonormal frame $Q$ under the one-step Jacobians, re-orthonormalise at each step through a factorisation $J_t Q = Q'R$, and accumulate the logarithms of the diagonal entries of $R$; the running averages converge to the exponents $\lambda_i$ (reported per unit time, after dividing by $dt$), with convergence guaranteed by Oseledets. A single such estimator is used throughout, calibrated against known answers: it returns zero to machine precision on a harmonic oscillator and recovers $\lambda_1\approx 0.906$ for the Lorenz system, as detailed in Section~\ref{sec:m-lyapunov}.
 
 
 \subsection{Jacobians and differentiable simulation}\label{sec:bg-jacobian}
@@ -257,8 +259,8 @@ the tangent dynamics the estimator integrates are the ones the simulator actuall
 % functionals of the SAME orbit, expected to agree as T -> infinity (Oseledets). Sets up Part A.
 
 Part~A rests on comparing two finite-horizon estimates of $\lambda_1$ computed from the \emph{same}
-orbit---one a property of the \emph{dynamics}, the other of the simulator's \emph{gradients}. The
-first is the Benettin/QR estimator of Section~\ref{sec:m-lyapunov}. The second reads
+orbit. The
+first is the calibrated Benettin/QR estimator of Section~\ref{sec:m-lyapunov}. The second reads
 $\lambda_1$ off the growth of the gradient gain introduced in Section~\ref{sec:bg-jacobian}: since
 $\norm{M_T}\sim e^{\lambda_1 T}$, the least-squares slope of $\ln\norm{M_T}_2$ against $T$ is itself
 an estimate of $\lambda_1$. Here $\norm{M_T}_2$ is the spectral norm (top singular value) of the
@@ -281,11 +283,22 @@ $\lambda_1$ are one and the same number---rather than as an exact identity.
 Part~A establishes the first pillar of the thesis: the largest Lyapunov exponent $\lambda_1$ governs
 the gradients a differentiable simulator produces. Section~\ref{sec:bg-jacobian} showed that every
 such gradient carries the rollout-Jacobian factor $M_T$ with $\norm{M_T}\sim e^{\lambda_1 T}$, and
-Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lambda_1$. We now
-(i) confirm the growth law and that its rate \emph{is} $\lambda_1$, (ii) show it holds across the
-integrable--chaotic range, (iii) turn the growth law into a \emph{usefulness} limit---the gradient
-predictability horizon $T\lesssim 1/\lambda_1$---and (iv) draw the consequence for trajectory
-optimisation.
+Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lambda_1$ read off that
+growth rate.
+
+Three systems play distinct roles. The chaotic \emph{acrobot} is the workhorse and carries every
+$\lambda_1$ claim; the integrable \emph{pendulum} ($\lambda_1\approx0$) is the null contrast, showing
+the effect vanishes when the dynamics are not chaotic; and the forced \emph{cartpole}, whose
+$\lambda_1$ is ill-defined (Section~\ref{sec:bg-systems}), appears only as a downstream application
+with no Lyapunov claim of its own.
+
+Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the
+matched pendulum--acrobot pair; (ii) show it holds across the whole integrable--chaotic range, by
+sweeping the acrobot's energy so $\lambda_1$ climbs continuously from near zero; (iii) turn the
+growth law into a \emph{usefulness} limit---the gradient predictability horizon $T\lesssim 1/\lambda_1$---through
+the collapse of the analytic-gradient signal-to-noise ratio on the acrobot; and (iv) draw the
+consequence for trajectory optimisation, swinging up the cartpole by gradient descent \emph{inside}
+that horizon.
 
 \subsection{The gradient-gain growth law}\label{sec:A-law}
 % slope of log||M_T|| = lambda_1; pendulum integrable (no blow-up) vs acrobot chaotic (e^{lambda_1 T}); Fig 1.
@@ -400,11 +413,207 @@ optimiser.
 % reproduces the integrable exponent, over-amplifies the chaotic one); mechanism (next-step MSE does
 % not constrain the Jacobian / breaks volume preservation); structure-preserving sequel (Fig 7):
 % plain MLP / volume-penalty MLP / symplectic HNN -- only the hard constraint recovers lambda_1.
-\emph{[To be written.]}
+
+Part~A established that the largest Lyapunov exponent $\lambda_1$ governs the gradients a
+differentiable simulator produces when the physics is correct. Part~B asks the dual question for a
+model that is \emph{learned} rather than given: does a world model trained only to predict the next
+state inherit the right $\lambda_1$? This is the spine of the section. A multilayer perceptron fit by
+next-step regression reproduces the integrable exponent but \emph{over-amplifies} the chaotic
+one---because next-step accuracy never constrains the Jacobian that carries $\lambda_1$---and only a
+model built with the right \emph{hard} structural constraint, symplectic and volume-preserving,
+recovers it.
+
+We reuse the cast of Part~A: the integrable \emph{pendulum} as the null contrast and the chaotic
+\emph{acrobot} as the workhorse; the forced cartpole carries no Lyapunov claim and plays no part here.
+The argument runs in four steps: the learned model and how fast its rollout drifts from the truth
+(Section~\ref{sec:B-model}); the learned-versus-true $\lambda_1$ that its Jacobian implies
+(Section~\ref{sec:B-lyap}); why next-step training is blind to $\lambda_1$ in the first place
+(Section~\ref{sec:B-mechanism}); and which structural constraint repairs it
+(Section~\ref{sec:B-structure}).
+
+\subsection{The learned world model and its prediction drift}\label{sec:B-model}
+
+A world model replaces the simulator's one-step map $x_{t+1}=F(x_t)$ with a learned surrogate
+$g_\phi$, fit so that iterating it reproduces trajectories of the true system. We deliberately use the
+smallest model that exhibits the effect: a residual multilayer perceptron
+$g_\phi(x)=x+\mathrm{net}_\phi(x)$ with two $\tanh$ hidden layers, trained by next-step mean-squared
+error on rollouts of the true simulator. It is given only the state pairs $(x_t,x_{t+1})$---no
+equations of motion, no Hamiltonian, no conserved quantity---which is exactly the regime in which one
+hopes a generic learner will simply absorb the dynamics from data.
+
+Such a model can be accurate one step at a time yet useless over a rollout, so the first question is
+how quickly its predictions drift. We roll $g_\phi$ forward from a shared initial condition and track
+the prediction error $\norm{\hat x_t - x_t}$ against the true trajectory (Fig.~\ref{fig:error-growth}).
+On both systems the error grows, but at visibly different rates: on the integrable pendulum it rises
+slowly, while on the chaotic acrobot it climbs roughly twice as fast before saturating. A log-linear
+fit over the pre-saturation window gives effective rates of $0.96\,\mathrm{s}^{-1}$ (pendulum) and
+$1.74\,\mathrm{s}^{-1}$ (acrobot).
+
+These rates measure \emph{model fidelity}, not the Lyapunov exponent. Two effects are superimposed:
+the model's own approximation error, which accumulates even on the non-chaotic pendulum, and---on the
+acrobot---the genuine chaotic amplification of that error. The pendulum makes the distinction
+concrete: its fitted $0.96\,\mathrm{s}^{-1}$ is nowhere near its true $\lambda_1\approx0$, so the drift
+rate cannot be read as $\lambda_1$. Figure~\ref{fig:error-growth} is therefore a qualitative
+statement---prediction degrades faster on chaotic dynamics---and isolating the exponent the model has
+actually learned requires probing its Jacobian directly, the subject of Section~\ref{sec:B-lyap}.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.75\linewidth]{fig3.png}
+  \caption{Residual-MLP world-model prediction error $\norm{\hat x_t - x_t}$ versus physical time
+  (semilog). Error grows on both systems but faster on the chaotic acrobot (effective log-slope
+  $1.74\,\mathrm{s}^{-1}$) than on the integrable pendulum ($0.96\,\mathrm{s}^{-1}$). These are
+  model-fidelity rates, not $\lambda_1$: the pendulum's is far from its true $\lambda_1\approx0$. The
+  Lyapunov comparison is Section~\ref{sec:B-lyap}.}
+  \label{fig:error-growth}
+\end{figure}
+
+\subsection{Learned versus true \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:B-lyap}
+
+To read off the exponent the model has learned, we apply the \emph{same} Benettin/QR estimator used for
+the true systems (Section~\ref{sec:m-lyapunov}) to the model's one-step Jacobian
+$\partial g_\phi/\partial x$, obtained by automatic differentiation. The only subtlety is where to
+evaluate it: rolling the model out and estimating $\lambda_1$ along its \emph{own} trajectory would
+conflate an inaccurate Jacobian with a drifted orbit, so we instead evaluate the learned Jacobian along
+the \emph{true} trajectory, after the same transient. Estimator, orbit, and transient are then
+identical for the learned and reference exponents; only the source of the Jacobian differs---true
+physics versus learned model---so any gap is the model's Jacobian alone. A faithful model, whose
+Jacobians match the true ones along the orbit, would return the true $\lambda_1$.
+
+Figure~\ref{fig:lyap-scatter} plots learned against true $\lambda_1$ for the two systems. On the
+integrable pendulum the model lands on the truth: a learned $\lambda_1\approx 0.046\,\mathrm{s}^{-1}$
+against a true $0.063\,\mathrm{s}^{-1}$, both effectively zero---the network correctly reports
+non-chaotic dynamics. On the chaotic acrobot it does not: the learned exponent is
+$3.45\,\mathrm{s}^{-1}$ against a true $1.04\,\mathrm{s}^{-1}$, an over-amplification by a factor of
+$3.3$. The model is not merely imprecise here; it manufactures sensitivity the true dynamics do not
+have.
+
+The asymmetry is the point. The network is trained to low next-step error on both systems, yet it
+reproduces $\lambda_1$ only where the exponent is trivial and inflates it precisely where chaotic
+sensitivity makes it matter. Low next-step error is therefore no guarantee of dynamical fidelity:
+$\lambda_1$ is a property the training objective never sees, and on chaotic dynamics the learned model
+overstates it threefold. Section~\ref{sec:B-mechanism} explains why next-step regression is blind to
+it.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.6\linewidth]{fig4.png}
+  \caption{Learned versus true $\lambda_1$, both from the same Benettin/QR estimator evaluated along
+  the true orbit. The integrable pendulum sits on the $y=x$ line (both $\lambda_1\approx0$); the
+  chaotic acrobot lies far above it---learned $3.45\,\mathrm{s}^{-1}$ versus true
+  $1.04\,\mathrm{s}^{-1}$, an over-amplification of $3.3\times$. Next-step accuracy does not imply the
+  right $\lambda_1$.}
+  \label{fig:lyap-scatter}
+\end{figure}
+
+\subsection{Why next-step training cannot see \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:B-mechanism}
+
+The failure in Section~\ref{sec:B-lyap} has a precise cause. Next-step mean-squared error penalises
+$\norm{g_\phi(x_t)-x_{t+1}}^2$ at the training states: it supervises \emph{where} points are mapped.
+But $\lambda_1$ is a property of the \emph{Jacobian} $\partial g_\phi/\partial x$, which governs how
+infinitesimal perturbations are stretched, and next-step error never targets a derivative. With finite
+data and finite capacity a model can drive its pointwise error low while its Jacobian---constrained by
+no derivative target---remains substantially wrong. The threefold over-amplification of
+Section~\ref{sec:B-lyap} is exactly that gap made visible: the network reproduces the trajectory well
+yet equips it with the wrong sensitivity.
+
+There is a sharper way to name what is missing. The true dynamics are Hamiltonian, and in canonical
+coordinates they conserve phase-space volume exactly---the Lyapunov spectrum sums to zero
+(Eq.~\eqref{eq:sum-rule}). That volume law is a structural fingerprint of genuine mechanics, yet it is a
+property of the Jacobian's \emph{determinant}---once more, the object next-step regression never
+touches---so a pointwise learner has no route to discover it. We read this fidelity off the
+coordinate-invariant exponent $\lambda_1$ rather than a raw volume sum, since the volume law is exact
+only in the canonical $(\theta,p)$ frame and not the $(\theta,\omega)$ coordinates the model is fit in.
+The same reasoning points to the remedy: rather than hope training stumbles onto the right Jacobian,
+build the structure in. Section~\ref{sec:B-structure} does exactly this, contrasting a soft penalty
+that \emph{asks} for volume preservation with a symplectic architecture that \emph{guarantees} it.
+
+\subsection{Structure-preserving world models}\label{sec:B-structure}
+
+Section~\ref{sec:B-mechanism} argued that the cure is to build the missing structure into the model
+rather than hope training discovers it. We test this on the chaotic acrobot with three world models
+that impose volume structure with increasing force. The first is the plain MLP of
+Sections~\ref{sec:B-model}--\ref{sec:B-mechanism}, with no constraint. The second is a
+\emph{volume-penalty} MLP, which adds to the next-step loss a soft penalty
+$\bigl(\log\lvert\det\,\partial g_\phi/\partial x\rvert\bigr)^2$ pulling the one-step Jacobian toward
+unit determinant---an explicit \emph{request} for volume preservation. The third is a
+\emph{Hamiltonian neural network} (HNN), which builds it in structurally, through a symplectic
+integration step.
+
+The HNN is the structurally honest model. It learns a scalar Hamiltonian $H_\phi(q,p)$ on canonical
+coordinates ($q=\theta$, $p=M(\theta)\,\omega$, with $M$ the mass matrix), forms the Hamiltonian flow
+$\dot q=\partial H/\partial p$, $\dot p=-\partial H/\partial q$, and advances it with a symplectic Euler
+step; angles enter through a $(\cos\theta,\sin\theta)$ embedding to respect the circle topology. For
+the acrobot's non-separable Hamiltonian this step is volume-preserving to $O(dt^2)$---its Jacobian has
+unit determinant up to that order---so the model conserves phase-space volume essentially by
+construction, not by training; measured along the canonical image of the true orbit, its spectrum sums
+to $0.001\,\mathrm{s}^{-1}$, against the true zero. Because $\lambda_1$ is coordinate-invariant, that
+same canonical evaluation gives a value directly comparable to the true $(\theta,\omega)$ exponent.
+
+Figure~\ref{fig:structured} reports the learned $\lambda_1$ of each model against the true acrobot
+exponent ($\approx 1.14\,\mathrm{s}^{-1}$ on this orbit). The two MLPs over-amplify, as in
+Section~\ref{sec:B-lyap}: the plain MLP gives $2.47\,\mathrm{s}^{-1}$ and the volume-penalty MLP
+$3.02\,\mathrm{s}^{-1}$---the soft penalty does not close the gap, and here is no better than no penalty
+at all. Only the HNN lands near the truth, at $0.87\,\mathrm{s}^{-1}$: the sole model that does not
+manufacture spurious sensitivity. The lesson is that the constraint must be hard---\emph{asking} for
+volume preservation through a penalty is not enough, while \emph{guaranteeing} it through a symplectic
+architecture is.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.75\linewidth]{fig7.png}
+  \caption{Learned $\lambda_1$ on the chaotic acrobot for three world models, against the true exponent
+  (dashed, $\approx 1.14\,\mathrm{s}^{-1}$). The unconstrained MLP ($2.47\,\mathrm{s}^{-1}$) and the
+  soft volume-penalty MLP ($3.02\,\mathrm{s}^{-1}$) over-amplify; only the symplectic HNN
+  ($0.87\,\mathrm{s}^{-1}$), volume-preserving by construction, lands near the truth---undershooting by
+  about $24\%$. Only a hard structural constraint recovers $\lambda_1$.}
+  \label{fig:structured}
+\end{figure}
+
+The win is qualified. The HNN recovers the right magnitude and the volume structure, but it undershoots
+the true exponent by about $24\%$ ($0.87$ against $1.14\,\mathrm{s}^{-1}$). Structure preservation is
+therefore necessary but not, on its own, sufficient for an exact match---a gap we leave to the
+Limitations (Section~\ref{sec:limitations}), along with the finite-time, single-seed, and integrator
+dependence of these estimates, the true reference itself included.
+
+Part~B thus mirrors Part~A under one exponent. Where Part~A showed that $\lambda_1$ bounds the gradients
+a correct simulator yields, Part~B shows that a learned world model is only as faithful as the
+$\lambda_1$ it reproduces---and that next-step accuracy does not deliver it. A model can predict the
+next state almost perfectly and still misjudge the chaotic sensitivity of the system it represents;
+$\lambda_1$ is the diagnostic that exposes the difference, and a structural prior is what repairs it.
 
 \section{Extensions}\label{sec:extensions}
 % Cosmos / world models; GR00T / action models; contact & stiff dynamics.
-\emph{[To be written.]}
+The diagnostics here are deliberately demonstrated on low-dimensional, single-threaded CPU
+systems. The natural next steps push them onto GPU hardware and onto the large learned models of
+the surrounding Physical-AI stack.
+
+\begin{itemize}
+\item \textbf{Scale to GPU.} Every diagnostic in this paper---the Benettin/QR estimator, the
+gradient-gain slope, and the perturbed-rollout SNR---is a sweep or ensemble average over many
+\emph{independent} trajectories (initial-condition averaging, the energy sweep, the SNR ensemble).
+The outer loop over trajectories, seeds, and sweep points is therefore \emph{embarrassingly
+parallel} and maps directly onto the GPU---in the spirit of the thousands of parallel environments
+used for large-scale robot learning---with only the per-trajectory time-stepping remaining
+sequential. Re-implementing the Warp simulators on \textbf{Newton} (GPU; the production successor
+to the removed \texttt{warp.sim}) is the concrete path, and the prerequisite for everything below.
+
+\item \textbf{Cosmos / large world models.} The Part-B fidelity test extends from our small
+surrogate to a large video world model such as \textbf{Cosmos}: does it preserve the physical
+Lyapunov spectrum, or hallucinate (and wash out) sensitivity? The error-growth diagnostic
+(Section~\ref{sec:B-model}) transfers to pixel space as a qualitative probe; the full
+Lyapunov-fidelity diagnostic (Section~\ref{sec:B-lyap}) requires recovering physical state
+$(\theta,\omega)$ from generated video---a perception front-end---or a latent-space tangent-vector
+adaptation, both research problems rather than a front-end swap, and both demanding GPU-scale
+compute.
+
+\item \textbf{GR00T / action models.} For a closed-loop policy such as \textbf{GR00T}, the natural
+robustness diagnostic is the finite-time Lyapunov exponent of the observation\,$\to$\,action%
+\,$\to$\,next-state map, with the policy in a simulation loop (Isaac Lab / Newton) and numerical
+(perturbed-rollout) sensitivities, since a large policy with a finite context window is a
+non-Markovian, non-autodiff-friendly map.
+
+\item \textbf{Contact and stiff dynamics.} A distinct gradient-pathology regime---non-smooth rather
+than chaotic---deliberately outside this conservative CPU study, but the setting where
+differentiable-simulator gradients most often break in practice.
+\end{itemize}
 
 \section{Limitations}\label{sec:limitations}
 % honest caveats (single seed, finite-time estimates, integrator/dt dependence, ...).

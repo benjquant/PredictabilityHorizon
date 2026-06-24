@@ -24,7 +24,7 @@ Enforcing the conservation structure helps: a symplectic Hamiltonian world model
 phase-space volume by construction and recovers λ₁ far closer to true than the plain or
 soft-penalized MLP (Fig. 7) — turning the cautionary finding constructive.
 
-See `writeup/note.md` for the full method, results, and honest limitations.
+See `writeup/paper.pdf` for the full write-up — background, methods, and results for Parts A and B (draft in progress).
 
 ---
 
