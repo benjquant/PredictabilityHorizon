@@ -55,7 +55,7 @@ files = ["src/predictability_horizon"]
 # wrapper modules; all other strict checks (incompatible types, missing returns,
 # etc.) stay on so genuine logic bugs in our own code are still caught.
 [[tool.mypy.overrides]]
-module = ["predictability_horizon.warpsim", "predictability_horizon.swingup"]
+module = ["predictability_horizon.warpsim", "predictability_horizon.swingup", "predictability_horizon.trajopt"]
 disable_error_code = ["no-untyped-call", "no-any-return"]
 
 # torch ships py.typed but several nn.Module methods (backward, tensor ops that
