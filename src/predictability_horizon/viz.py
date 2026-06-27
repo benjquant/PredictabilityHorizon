@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import matplotlib
 import numpy as np
@@ -87,60 +87,52 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
 
 
 def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
-    """Two-panel Fig 2: forgiving swing-up (works at all horizons) vs precise reaching (wall at 1/λ₁).
+    """One-panel Fig 2: optimisation success rate vs horizon T·λ₁ for three trajopt settings.
 
-    Left:  acrobot final hand height vs T·λ₁ (stays near +2 everywhere).
-    Right: reach final/baseline ratio vs T·λ₁ (acrobot wall; integrable pendulum no wall).
-    Both systems share the acrobot's Lyapunov axis at matched step counts.
+    Acrobot *precise* target-reaching cliffs from 100% to 0% at T·λ₁ ≈ log(1/τ) (the §4.3
+    predictability horizon with its log factor); the acrobot *forgiving* swing-up and the *integrable*
+    pendulum's precise reach show no wall. The horizon bounds precise differentiable-sim control,
+    not all of it. All three curves share the acrobot's Lyapunov axis at matched step counts.
     """
     acro = SYSTEMS["acrobot"]
     pend = SYSTEMS["pendulum"]
     x0a = np.array([2.5, 0.0, 0.0, 0.0])
     x0p = np.array([2.0, 0.0])
+    tau = 1e-2  # reach success tolerance: final/baseline < tau
     if fast:
-        dt, tlams, ns, ri, si = 5e-3, [0.5, 1.0, 2.0, 3.0], 2, 80, 120
+        dt, tlams, n_acro, n_ctrl, ri, si = 5e-3, [1.0, 2.0, 3.0, 4.0, 5.0], 3, 3, 100, 100
     else:
-        dt, tlams, ns, ri, si = 5e-4, [0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0], 5, 180, 250
+        dt, tlams, n_acro, n_ctrl, ri, si = 5e-4, [1.0, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0], 10, 5, 250, 250
     lam1 = measure_lambda1(acro, x0a, dt)
-    su = swingup_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=ns, iters=si)
-    ra = reach_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=ns, iters=ri)
-    rp = reach_horizon_sweep(pend, x0p, dt, tlams, lam1=lam1, n_seed=ns, iters=ri)
+    ra = reach_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=n_acro, iters=ri)
+    rp = reach_horizon_sweep(pend, x0p, dt, tlams, lam1=lam1, n_seed=n_ctrl, iters=ri)
+    su = swingup_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=n_ctrl, iters=si)
 
-    print(f"[fig2] lam1={lam1:.3f} | swingup height_mean={su['height_mean']} n_up={su['n_up']} | acro reach_mean={ra['ratio_mean']} | pend reach_mean={rp['ratio_mean']}")
+    def reach_success(res: dict[str, Any]) -> list[float]:
+        return [100.0 * float(np.mean(np.asarray(s) < tau)) for s in res["ratio_seeds"]]
 
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.2))  # noqa: N806
-    tl = np.array(su["tlams"])
-
-    # Left: forgiving swing-up.
-    hs = np.array(su["height_seeds"])
-    axL.fill_between(tl, hs.min(axis=1), hs.max(axis=1), alpha=0.2, color="C2")
-    axL.plot(tl, su["height_mean"], "o-", color="C2", label="acrobot swing-up")
-    axL.axhline(2.0, ls=":", color="grey", lw=1)
-    axL.axvline(1.0, ls="--", color="k", lw=1)
-    axL.text(1.02, -1.8, r"$T=1/\lambda_1$", fontsize=9)
-    axL.set_ylim(-2.1, 2.2)
-    axL.set_xlabel(r"horizon $T\lambda_1$")
-    axL.set_ylabel("final hand height")
-    axL.set_title("Forgiving objective: swing-up works at all horizons")
-    axL.legend(loc="lower right", fontsize=9)
-
-    # Right: precise reaching (log).
-    for res, c, lab in ((ra, "C3", "acrobot (chaotic)"), (rp, "C0", "pendulum (integrable)")):
-        rs = np.array(res["ratio_seeds"])
-        axR.fill_between(tl, rs.min(axis=1), rs.max(axis=1), alpha=0.18, color=c)
-        axR.plot(tl, res["ratio_mean"], "o-", color=c, label=lab)
-    axR.axhline(1.0, ls=":", color="grey", lw=1)
-    axR.axvline(1.0, ls="--", color="k", lw=1)
-    axR.set_yscale("log")
-    axR.set_xlabel(r"horizon $T\lambda_1$")
-    axR.set_ylabel("reach cost / baseline")
-    axR.set_title("Precise objective: wall at the predictability horizon")
-    axR.legend(loc="lower right", fontsize=9)
-
-    fig.suptitle(
-        rf"Trajectory optimisation through the differentiable simulator ($\lambda_1={lam1:.2f}$/s)",
-        fontsize=12,
+    acro_reach = reach_success(ra)
+    pend_reach = reach_success(rp)
+    swing = [100.0 * n / n_ctrl for n in su["n_up"]]
+    tl = np.asarray(tlams)
+    print(
+        f"[fig2] lam1={lam1:.3f} | acro_reach%={acro_reach} | pend_reach%={pend_reach} | swing%={swing}"
     )
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    ax.plot(tl, swing, "o-", color="C2", label="acrobot — swing-up (forgiving)")
+    ax.plot(tl, pend_reach, "s-", color="C0", label="pendulum — precise reach (integrable)")
+    ax.plot(tl, acro_reach, "D-", color="C3", label="acrobot — precise reach (chaotic)")
+    thoriz = float(np.log(1.0 / tau))  # predicted wall in T·λ₁ units = log(1/τ)
+    ax.axvline(thoriz, ls="--", color="k", lw=1)
+    ax.text(thoriz * 1.01, 55, r"$T\lambda_1=\log(1/\tau)$", rotation=90, va="center", fontsize=9)
+    ax.set_xlabel(r"horizon $T\lambda_1$ (Lyapunov times)")
+    ax.set_ylabel("optimisation success rate (%)")
+    ax.set_ylim(-5, 108)
+    ax.set_title(
+        rf"Predictability horizon bounds precise diff-sim control ($\lambda_1={lam1:.2f}$/s)"
+    )
+    ax.legend(loc="center left", fontsize=9)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
