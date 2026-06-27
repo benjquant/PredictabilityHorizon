@@ -76,7 +76,7 @@ pytest -q                        # full suite (20+ min; world-model training tes
 | Figure | Description |
 |--------|-------------|
 | `writeup/figures/fig1.png` | Gradient-gain ‖∂x_T/∂x₀‖₂ vs horizon — slope tracks λ₁ for the chaotic acrobot, flat for the integrable pendulum |
-| `writeup/figures/fig2.png` | Cartpole swing-up loss curve via differentiable simulation |
+| `writeup/figures/fig2.png` | Acrobot trajectory optimisation: forgiving swing-up vs precise reaching, success vs horizon T·λ₁ |
 | `writeup/figures/fig3.png` | World-model prediction-error growth, integrable vs chaotic |
 | `writeup/figures/fig4.png` | Learned vs true λ₁ — the surrogate over-amplifies the chaotic exponent |
 | `writeup/figures/fig5.png` | Gradient-gain slope vs λ₁ across regimes (pendulum + acrobot energy sweep) — points track y=x, corr 0.99 |

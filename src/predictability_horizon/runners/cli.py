@@ -33,7 +33,7 @@ def reproduce(out: str) -> None:
     structure-preserving comparison; ~35 min on CPU)."""
     from predictability_horizon.viz import (
         make_fig1_gradient_law,
-        make_fig2_swingup,
+        make_fig2_trajopt_horizon,
         make_fig3_error_growth,
         make_fig4_lyapunov_scatter,
         make_fig5_slope_vs_lambda,
@@ -44,7 +44,7 @@ def reproduce(out: str) -> None:
     d = Path(out)
     for fn, name in [
         (make_fig1_gradient_law, "fig1.png"),
-        (make_fig2_swingup, "fig2.png"),
+        (make_fig2_trajopt_horizon, "fig2.png"),
         (make_fig3_error_growth, "fig3.png"),
         (make_fig4_lyapunov_scatter, "fig4.png"),
         (make_fig5_slope_vs_lambda, "fig5.png"),

@@ -17,8 +17,12 @@ import matplotlib.pyplot as plt
 from predictability_horizon.experiments import gradient_snr_vs_horizon, slope_vs_lambda_points
 from predictability_horizon.gradient_law import gradient_law
 from predictability_horizon.lyapunov import lyapunov_spectrum
-from predictability_horizon.swingup import optimize_swingup
 from predictability_horizon.systems import SYSTEMS, acrobot, cartpole, pendulum  # noqa: F401
+from predictability_horizon.trajopt import (
+    measure_lambda1,
+    reach_horizon_sweep,
+    swingup_horizon_sweep,
+)
 from predictability_horizon.warpsim import rollout
 from predictability_horizon.worldmodel import (
     MLP,
@@ -82,14 +86,61 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
     return out
 
 
-def make_fig2_swingup(out: Path, fast: bool = False) -> Path:
-    """Loss curve for cartpole swing-up optimized via differentiable simulation."""
-    hist = optimize_swingup(T=100, iters=30 if fast else 300, lr=1.5)
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(hist)
-    ax.set_xlabel("optimization iteration")
-    ax.set_ylabel("upright-tracking cost")
-    ax.set_title("Cartpole swing-up via differentiable simulation (Warp)")
+def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
+    """Two-panel Fig 2: forgiving swing-up (works at all horizons) vs precise reaching (wall at 1/λ₁).
+
+    Left:  acrobot final hand height vs T·λ₁ (stays near +2 everywhere).
+    Right: reach final/baseline ratio vs T·λ₁ (acrobot wall; integrable pendulum no wall).
+    Both systems share the acrobot's Lyapunov axis at matched step counts.
+    """
+    acro = SYSTEMS["acrobot"]
+    pend = SYSTEMS["pendulum"]
+    x0a = np.array([2.5, 0.0, 0.0, 0.0])
+    x0p = np.array([2.0, 0.0])
+    if fast:
+        dt, tlams, ns, ri, si = 5e-3, [0.5, 1.0, 2.0, 3.0], 2, 80, 120
+    else:
+        dt, tlams, ns, ri, si = 5e-4, [0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0], 5, 180, 250
+    lam1 = measure_lambda1(acro, x0a, dt)
+    su = swingup_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=ns, iters=si)
+    ra = reach_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=ns, iters=ri)
+    rp = reach_horizon_sweep(pend, x0p, dt, tlams, lam1=lam1, n_seed=ns, iters=ri)
+
+    print(f"[fig2] lam1={lam1:.3f} | swingup height_mean={su['height_mean']} n_up={su['n_up']} | acro reach_mean={ra['ratio_mean']} | pend reach_mean={rp['ratio_mean']}")
+
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11, 4.2))  # noqa: N806
+    tl = np.array(su["tlams"])
+
+    # Left: forgiving swing-up.
+    hs = np.array(su["height_seeds"])
+    axL.fill_between(tl, hs.min(axis=1), hs.max(axis=1), alpha=0.2, color="C2")
+    axL.plot(tl, su["height_mean"], "o-", color="C2", label="acrobot swing-up")
+    axL.axhline(2.0, ls=":", color="grey", lw=1)
+    axL.axvline(1.0, ls="--", color="k", lw=1)
+    axL.text(1.02, -1.8, r"$T=1/\lambda_1$", fontsize=9)
+    axL.set_ylim(-2.1, 2.2)
+    axL.set_xlabel(r"horizon $T\lambda_1$")
+    axL.set_ylabel("final hand height")
+    axL.set_title("Forgiving objective: swing-up works at all horizons")
+    axL.legend(loc="lower right", fontsize=9)
+
+    # Right: precise reaching (log).
+    for res, c, lab in ((ra, "C3", "acrobot (chaotic)"), (rp, "C0", "pendulum (integrable)")):
+        rs = np.array(res["ratio_seeds"])
+        axR.fill_between(tl, rs.min(axis=1), rs.max(axis=1), alpha=0.18, color=c)
+        axR.plot(tl, res["ratio_mean"], "o-", color=c, label=lab)
+    axR.axhline(1.0, ls=":", color="grey", lw=1)
+    axR.axvline(1.0, ls="--", color="k", lw=1)
+    axR.set_yscale("log")
+    axR.set_xlabel(r"horizon $T\lambda_1$")
+    axR.set_ylabel("reach cost / baseline")
+    axR.set_title("Precise objective: wall at the predictability horizon")
+    axR.legend(loc="lower right", fontsize=9)
+
+    fig.suptitle(
+        rf"Trajectory optimisation through the differentiable simulator ($\lambda_1={lam1:.2f}$/s)",
+        fontsize=12,
+    )
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
