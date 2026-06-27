@@ -170,3 +170,75 @@ def reach_horizon_sweep(
         out["ratio_mean"].append(float(np.mean(ratios)))
         out["ratio_seeds"].append(ratios)
     return out
+
+
+@wp.kernel
+def _terminal_upright_cost(
+    states: wp.array2d(dtype=wp.float32),  # type: ignore[valid-type]
+    actions: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+    T: int,  # noqa: N803
+    loss: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+) -> None:
+    """Acrobot hand-up: 0 when both links are vertical (θ=π), 4 hanging. Terminal step only.
+
+    The regulariser is T-INDEPENDENT (per-step 1e-7) so it never suppresses the swing-up.
+    """
+    c = (wp.float32(1.0) + wp.cos(states[T, 0])) + (wp.float32(1.0) + wp.cos(states[T, 1]))
+    for t in range(T):
+        c = c + wp.float32(1.0e-7) * actions[t] * actions[t]
+    loss[0] = c
+
+
+def hand_height(state: Vec) -> float:
+    """Acrobot hand (link-2 tip) height: -2 hanging, 0 horizontal, +2 straight up."""
+    return float(-(np.cos(state[0]) + np.cos(state[1])))
+
+
+def optimize_swingup(
+    system: System,
+    x0: Vec,
+    dt: float,
+    T: int,  # noqa: N803
+    iters: int = 250,
+    lr: float = 1.0,
+    sigma0: float = 0.3,
+    seed: int = 0,
+    device: str = "cpu",
+) -> tuple[Vec, Vec]:
+    """Raise the acrobot's hand to upright (terminal-upright cost). Returns (loss_history, final_state).
+
+    Acrobot-specific: the cost assumes the first two state components are the two link angles.
+    """
+    rng = np.random.default_rng(seed)
+    u_init = sigma0 * rng.standard_normal(T)
+
+    def build_loss(states: Any, actions: Any, loss: Any) -> None:
+        wp.launch(_terminal_upright_cost, dim=1, inputs=[states, actions, T, loss], device=device)
+
+    return _optimize_actions(system, x0, dt, T, u_init, build_loss, iters, lr, device)
+
+
+def swingup_horizon_sweep(
+    system: System,
+    x0: Vec,
+    dt: float,
+    tlams: list[float],
+    lam1: float | None = None,
+    n_seed: int = 5,
+    iters: int = 250,
+    lr: float = 1.0,
+    device: str = "cpu",
+) -> dict[str, Any]:
+    """Final hand height (and # seeds reaching upright) across the horizon grid ``tlams``."""
+    if lam1 is None:
+        lam1 = measure_lambda1(system, x0, dt)
+    out: dict[str, Any] = {"lam1": lam1, "tlams": [], "steps": [], "height_mean": [], "height_seeds": [], "n_up": []}
+    for tl in tlams:
+        T = _steps(tl, lam1, dt)  # noqa: N806
+        hs = [hand_height(optimize_swingup(system, x0, dt, T, iters=iters, lr=lr, seed=sd, device=device)[1]) for sd in range(n_seed)]
+        out["tlams"].append(tl)
+        out["steps"].append(T)
+        out["height_mean"].append(float(np.mean(hs)))
+        out["height_seeds"].append(hs)
+        out["n_up"].append(int(sum(1 for h in hs if h > 1.5)))
+    return out

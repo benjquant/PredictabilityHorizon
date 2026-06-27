@@ -35,3 +35,19 @@ def test_pendulum_no_wall():
     # Chaos-specificity control: the integrable pendulum recovers at the SAME horizon the acrobot fails.
     r = reach_ratio(SYSTEMS["pendulum"], X0P, DT, _steps(3.0), iters=100, seed=0)
     assert r < 1e-2
+
+
+def test_acrobot_swings_up_inside_horizon():
+    # Forgiving objective: the hand reaches upright even at a short horizon.
+    from predictability_horizon.trajopt import hand_height, optimize_swingup
+
+    _, final = optimize_swingup(SYSTEMS["acrobot"], X0A, DT, _steps(1.0), iters=180, lr=1.0, seed=0)
+    assert hand_height(final) > 1.0
+
+
+def test_acrobot_swings_up_past_horizon():
+    # The forgiving objective sails through the horizon where precise reaching fails.
+    from predictability_horizon.trajopt import hand_height, optimize_swingup
+
+    _, final = optimize_swingup(SYSTEMS["acrobot"], X0A, DT, _steps(3.0), iters=180, lr=1.0, seed=0)
+    assert hand_height(final) > 1.0
