@@ -122,28 +122,27 @@ What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapun
 
 Equation~\eqref{eq:loss-grad} also gives a second, independent handle on $\lambda_1$. By Eq.~\eqref{eq:lambda1}, the growth rate of the gradient gain $\norm{M_T}$ with $T$ is itself a finite-horizon estimate of $\lambda_1$---distinct from the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov}, computed from the same orbit, and expected to agree with it as $T\to\infty$ by Oseledets. Section~\ref{sec:m-consistency} makes this comparison the basis of Part~A.
 
-\subsection{The three systems}\label{sec:bg-systems}
-% pendulum (integrable, lambda_1 = 0), cartpole (underactuated), acrobot (chaotic, lambda_1 > 0).
+\subsection{The two systems}\label{sec:bg-systems}
+% pendulum (integrable, lambda_1 = 0), acrobot (chaotic, lambda_1 > 0).
 % Characterised as ODE / Hamiltonian systems; separable vs non-separable Hamiltonian; discretised by
 % semi-implicit (symplectic) Euler.
 
-We study three mechanical systems that share a common structure but span the range of dynamical behaviour we care about. Each is a conservative Hamiltonian system: writing the state as a configuration $q$ with conjugate momentum $p$, the dynamics follow from a Hamiltonian
+We study two mechanical systems that share a common structure but span the range of dynamical behaviour we care about. Each is a conservative Hamiltonian system: writing the state as a configuration $q$ with conjugate momentum $p$, the dynamics follow from a Hamiltonian
 \begin{equation}
 H(q,p) = \tfrac{1}{2}\,p^\top M(q)^{-1} p + V(q),
 \label{eq:hamiltonian}
 \end{equation}
 the sum of kinetic and potential energy, with $M(q)$ the configuration-dependent mass (inertia) matrix~\cite{arnold1989mathematical}. Equivalently, in second-order form the passive dynamics obey the manipulator equation $M(q)\ddot q + C(q,\dot q)\dot q + G(q) = 0$~\cite{tedrake2023underactuated}; control enters as a forcing term on the right, but our Lyapunov diagnostics concern the underlying conservative flow, for which Liouville's theorem applies and the spectrum sums to zero as in Section~\ref{sec:bg-lyapunov}.
 
-The three systems form a deliberate ladder in $\lambda_1$:
+The two systems form a deliberate contrast in $\lambda_1$:
 \begin{itemize}
 \item \textbf{Pendulum} --- a single degree of freedom with separable Hamiltonian $H=\tfrac{1}{2}p^2 + V(\theta)$. A one-degree-of-freedom autonomous Hamiltonian is integrable: energy conservation confines every orbit to a level set of $H$, leaving no room for exponential divergence, so $\lambda_1=0$~\cite{arnold1989mathematical}. This is our ordered baseline.
-\item \textbf{Cartpole} --- a pole hinged on a translating cart: two degrees of freedom, underactuated. It is the canonical control benchmark~\cite{barto1983neuronlike,tedrake2023underactuated} and sits at intermediate complexity.
 \item \textbf{Acrobot} --- a two-link pendulum actuated only at the elbow, the textbook chaotic underactuated system~\cite{spong1995swing}. Its inertia matrix $M(q)$ depends on the configuration, making the Hamiltonian \emph{non-separable}, and its passive dynamics are chaotic, $\lambda_1>0$.
 \end{itemize}
 
 The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B.
 
-Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The cartpole's larger-step discretisation is not volume-preserving, and it enters only as the forced swing-up demonstration of Part~A, never in a Lyapunov claim. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the acrobot---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
+Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the acrobot---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
 
 \section{Methods --- what we simulate and how}\label{sec:methods}
 
@@ -179,17 +178,6 @@ The kernel advances Eq.~\eqref{eq:semi-implicit} with $\dot\omega = M(\theta)^{-
 form obtained by inverting the $2\times2$ system; we verified that this closed form reproduces
 $M(\theta)^{-1}F$ to machine precision. Because $M$ depends on $\theta$, the Hamiltonian is
 non-separable, which is the structural feature exploited in Part~B (Section~\ref{sec:partB}).
-\item \textbf{Cartpole} (state $(x,\theta,v,\omega)$): the uniform-rod
-benchmark~\cite{barto1983neuronlike,tedrake2023underactuated}, with
-\begin{equation}
-\ddot\theta = \frac{g\sin\theta - \cos\theta\,\big[(f + m_p \ell\,\omega^2\sin\theta)/(m_c+m_p)\big]}
-{\ell\big(\tfrac{4}{3} - m_p\cos^2\theta/(m_c+m_p)\big)}, \qquad
-\ddot x = \frac{f + m_p \ell\,\omega^2\sin\theta}{m_c+m_p} - \frac{m_p \ell\,\ddot\theta\cos\theta}{m_c+m_p},
-\end{equation}
-driven by the cart force $f$. The cartpole is used only as the trajectory-optimisation target of
-Part~A (the forced swing-up demonstration); over Lyapunov horizons its discretisation is
-\emph{not} volume-preserving (the measured mechanical energy drifts by $\approx 1.8\%$ over $20$
-steps at $dt = 0.02$), so it is excluded from all Lyapunov claims.
 \end{itemize}
 
 Reverse-mode differentiation requires the full trajectory to be available on the backward pass, so
@@ -206,11 +194,10 @@ Table~\ref{tab:sim-params}.
 System & $dt$ & Parameters \\
 \midrule
 Pendulum & $5\times10^{-3}$ & $g=9.81,\ \ell=1$ \\
-Cartpole & $2\times10^{-2}$ & $m_c=1,\ m_p=0.1,\ \ell=0.5,\ g=9.81$ \\
 Acrobot  & $5\times10^{-4}$ & $m_1=m_2=1,\ l_1=l_2=1,\ g=9.81$ \\
 \bottomrule
 \end{tabular}
-\caption{Integration step and physical parameters of the three Warp simulators.}
+\caption{Integration step and physical parameters of the two Warp simulators.}
 \label{tab:sim-params}
 \end{table}
 
@@ -279,26 +266,24 @@ $\lambda_1$ are one and the same number---rather than as an exact identity.
 \section{Part A --- \texorpdfstring{$\lambda_1$}{lambda1} bounds differentiable-simulator gradients}\label{sec:partA}
 % ||M_T|| ~ e^{lambda_1 T} (one factor); slope = lambda_1 (exact on a linear map; consistent on the
 % chaotic acrobot); regime sweep -> slope tracks lambda_1, corr 0.99 (Fig 5); the horizon T <~ 1/lambda_1
-% demonstrated via the analytic-gradient SNR (Fig 6); cartpole swing-up trajectory optimisation (Fig 2).
+% demonstrated via the analytic-gradient SNR (Fig 6); acrobot trajectory optimisation, precise vs forgiving (Fig 2).
 Part~A establishes the first pillar of the thesis: the largest Lyapunov exponent $\lambda_1$ governs
 the gradients a differentiable simulator produces. Section~\ref{sec:bg-jacobian} showed that every
 such gradient carries the rollout-Jacobian factor $M_T$ with $\norm{M_T}\sim e^{\lambda_1 T}$, and
 Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lambda_1$ read off that
 growth rate.
 
-Three systems play distinct roles. The chaotic \emph{acrobot} is the workhorse and carries every
+Two systems play distinct roles. The chaotic \emph{acrobot} is the workhorse and carries every
 $\lambda_1$ claim; the integrable \emph{pendulum} ($\lambda_1\approx0$) is the null contrast, showing
-the effect vanishes when the dynamics are not chaotic; and the forced \emph{cartpole}, whose
-$\lambda_1$ is ill-defined (Section~\ref{sec:bg-systems}), appears only as a downstream application
-with no Lyapunov claim of its own.
+the effect vanishes when the dynamics are not chaotic.
 
 Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the
 matched pendulum--acrobot pair; (ii) show it holds across the whole integrable--chaotic range, by
 sweeping the acrobot's energy so $\lambda_1$ climbs continuously from near zero; (iii) turn the
 growth law into a \emph{usefulness} limit---the gradient predictability horizon $T\lesssim 1/\lambda_1$---through
 the collapse of the analytic-gradient signal-to-noise ratio on the acrobot; and (iv) draw the
-consequence for trajectory optimisation, swinging up the cartpole by gradient descent \emph{inside}
-that horizon.
+consequence for trajectory optimisation through the simulator, where the horizon bounds \emph{precise}
+control on the acrobot but a forgiving swing-up sails through it.
 
 \subsection{The gradient-gain growth law}\label{sec:A-law}
 % slope of log||M_T|| = lambda_1; pendulum integrable (no blow-up) vs acrobot chaotic (e^{lambda_1 T}); Fig 1.
@@ -347,9 +332,8 @@ thus $\lambda_1$ not merely on a single orbit but as a function of the regime.
   \label{fig:slope-vs-lambda}
 \end{figure}
 
-The cartpole is deliberately absent: it is forced and not volume-preserving
-(Section~\ref{sec:bg-systems}), so its $\lambda_1$ is regime-dependent and ill-defined, and the
-acrobot energy sweep already spans the integrable-to-chaotic transition. The horizontal error bars
+The acrobot energy sweep already spans the integrable-to-chaotic transition, so no further system is
+needed here. The horizontal error bars
 report the finite-time scatter of the Benettin estimate over independent windows---an honest depiction
 of finite-time Lyapunov uncertainty, not a confidence interval on the plotted point.
 
@@ -385,28 +369,52 @@ for every nearby start, which is exactly what makes long differentiable rollouts
 first-order optimisation.
 
 \subsection{Consequence: optimisation through the simulator}\label{sec:A-consequence}
-% cartpole swing-up by gradient descent through the diff-sim; forced, excluded from lambda_1 claims; Fig 2.
+% acrobot trajectory optimisation: precise reach hits the log-factor wall, forgiving swing-up does not; Fig 2.
 Sections~\ref{sec:A-law}--\ref{sec:A-horizon} measured how far a differentiable rollout's gradient
-stays usable; this last subsection shows the positive side of that boundary---that \emph{inside} the
-horizon the gradient is good enough to optimise through. We swing a cartpole from hanging to upright by
-gradient descent on the control sequence, backpropagating the upright-tracking cost through the
-differentiable Warp rollout (Adam, horizon $T=100$ steps; Fig.~\ref{fig:swingup}). The cost falls from
-$200.7$ to $57.9$ over $300$ iterations---the analytic gradient, taken over a horizon short enough to
-remain informative, solves the task.
+stays usable; here we draw the consequence for optimisation, and reach a statement sharper than
+``the gradient works inside the horizon and fails outside it''. On the chaotic acrobot we optimise an
+open-loop elbow torque by gradient descent through the differentiable Warp rollout (Adam), and track
+the \emph{success rate} of two objectives as the rollout horizon grows (Fig.~\ref{fig:trajopt}); the
+integrable pendulum is the null control.
+
+The gradient of a single deterministic rollout is \emph{exact}, so optimisation succeeds well beyond
+the naive Lyapunov time. A \emph{forgiving} objective---swing the hand to upright, satisfied by a large
+basin of control sequences---succeeds at every horizon we tried; and a \emph{precise} objective---reach
+a specific feasible terminal state $x_T^\star$ (one a known control attains, so a zero-cost solution
+provably exists)---succeeds out to several Lyapunov times. The horizon does not simply forbid
+optimisation past $1/\lambda_1$.
+
+The precise objective nonetheless hits a sharp wall, at exactly the horizon Section~\ref{sec:A-horizon}
+predicts. Past $T\lambda_1\approx\log(1/\tau)$---the predictability horizon $1/\lambda_1$ carrying the
+same logarithmic factor in the target precision $\tau$ that set the SNR crossover---the success rate of
+precise reaching collapses from $\sim\!100\%$ to zero, and beyond it the optimiser ends \emph{worse}
+than doing nothing: the squared-error gradient inherits the $e^{2\lambda_1 T}$ rollout gain and the
+descent diverges. The collapse is genuinely chaotic---the integrable pendulum, optimised over identical
+horizons and step counts, never fails, and the forgiving swing-up on the same chaotic acrobot never
+fails. The wall is specific both to chaos and to objectives that demand precision.
 
 \begin{figure}[t]\centering
-  \includegraphics[width=0.6\linewidth]{fig2.png}
-  \caption{Cartpole swing-up by gradient descent through the differentiable simulator: upright-tracking
-  cost versus optimisation iteration ($T=100$, Adam). The cartpole is forced and is excluded from all
-  $\lambda_1$ claims (Section~\ref{sec:bg-systems}).}
-  \label{fig:swingup}
+  \includegraphics[width=0.72\linewidth]{fig2.png}
+  \caption{Optimisation through the differentiable simulator on the chaotic acrobot versus rollout
+  horizon $T\lambda_1$. Success rate (over random seeds) of three trajectory-optimisation settings: a
+  \emph{forgiving} objective (swing the hand up) and the \emph{integrable} pendulum's \emph{precise}
+  target-reaching succeed at all horizons, while the chaotic acrobot's \emph{precise} target-reaching
+  collapses from $100\%$ to $0\%$ at the predictability horizon $T\lambda_1\approx\log(1/\tau)$
+  (dashed; $\tau=10^{-2}$ the target tolerance), past which the $e^{2\lambda_1 T}$ gradient gain makes
+  the descent diverge. The horizon---with its logarithmic factor (Section~\ref{sec:A-horizon})---bounds
+  \emph{precise} differentiable-sim control; forgiving objectives and integrable dynamics show no wall.}
+  \label{fig:trajopt}
 \end{figure}
 
-The cartpole appears only here, as an application: it is forced and not volume-preserving
-(Section~\ref{sec:bg-systems}), so it carries no Lyapunov claim. The point is not a number for this
-system but the converse of the curse of chaos---that the same gradient which becomes unusable past
-$T\sim1/\lambda_1$ is, within that horizon, exactly what makes differentiable simulation a powerful
-optimiser.
+The consequence is a refined curse of chaos for differentiable
+simulation~\cite{suh2022differentiable}. The predictability horizon---with its logarithmic
+factor---bounds \emph{precise} control through a differentiable simulator: when the objective pins a
+specific terminal state, the chaotically amplified gradient can no longer deliver it past
+$T\sim\log(1/\tau)/\lambda_1$. It does not bound differentiable-sim optimisation in general---an exact
+single-trajectory gradient solves a forgiving objective at any horizon, and an integrable system has no
+wall. This is the operational face of the signal-to-noise collapse of Section~\ref{sec:A-horizon},
+whose squared-norm objective is itself a precise one; the wall here is for open-loop single-shooting,
+and multiple shooting over sub-horizon segments would push it out.
 
 \section{Part B --- Lyapunov fidelity of learned world models}\label{sec:partB}
 % MLP world model; prediction-error growth (Fig 3, qualitative); learned vs true lambda_1 (Fig 4:
@@ -424,7 +432,7 @@ model built with the right \emph{hard} structural constraint, symplectic and vol
 recovers it.
 
 We reuse the cast of Part~A: the integrable \emph{pendulum} as the null contrast and the chaotic
-\emph{acrobot} as the workhorse; the forced cartpole carries no Lyapunov claim and plays no part here.
+\emph{acrobot} as the workhorse.
 The argument runs in four steps: the learned model and how fast its rollout drifts from the truth
 (Section~\ref{sec:B-model}); the learned-versus-true $\lambda_1$ that its Jacobian implies
 (Section~\ref{sec:B-lyap}); why next-step training is blind to $\lambda_1$ in the first place
