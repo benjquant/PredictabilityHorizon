@@ -387,10 +387,10 @@ optimisation past $1/\lambda_1$.
 
 The precise objective nonetheless hits a sharp wall, at exactly the horizon Section~\ref{sec:A-horizon}
 predicts. Past the predictability horizon---$1/\lambda_1$ carrying the same logarithmic factor in the
-achievable precision that set the SNR crossover, here $T\lambda_1\approx4$---the precise-reach cost
+achievable precision that set the SNR crossover, here $T\lambda_1\approx4.6$---the precise-reach cost
 rises \emph{through} the do-nothing baseline: the optimiser ends worse than zero control, its
 squared-error gradient inheriting the $e^{2\lambda_1 T}$ rollout gain until the descent diverges (to
-$\sim\!80\times$ baseline by $T\lambda_1=5$). The wall is genuinely chaotic---the integrable pendulum,
+$\sim\!300\times$ baseline by $T\lambda_1=5$). The wall is genuinely chaotic---the integrable pendulum,
 optimised over identical horizons and step counts, stays orders of magnitude below the baseline
 throughout, as does the forgiving swing-up on the same chaotic acrobot. It is specific both to chaos
 and to objectives that demand precision.
@@ -402,7 +402,7 @@ and to objectives that demand precision.
   reach targets, shaded $10$--$90\%$ band). A \emph{forgiving} objective (swing the hand up; green) and
   the \emph{integrable} pendulum's \emph{precise} target-reaching (blue) stay orders of magnitude below
   the do-nothing baseline (dotted) at every horizon, while the chaotic acrobot's \emph{precise}
-  target-reaching (red) rises through the baseline at the predictability horizon $T\lambda_1\approx4$
+  target-reaching (red) rises through the baseline near the predictability horizon $T\lambda_1\approx4.6$
   ($1/\lambda_1$ up to the logarithmic factor of Section~\ref{sec:A-horizon}) and blows up beyond it as
   the $e^{2\lambda_1 T}$ gradient gain makes the descent diverge; the widening red band marks the loss
   of reliability. The horizon bounds \emph{precise} differentiable-sim control; forgiving objectives
