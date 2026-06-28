@@ -374,8 +374,9 @@ Sections~\ref{sec:A-law}--\ref{sec:A-horizon} measured how far a differentiable 
 stays usable; here we draw the consequence for optimisation, and reach a statement sharper than
 ``the gradient works inside the horizon and fails outside it''. On the chaotic acrobot we optimise an
 open-loop elbow torque by gradient descent through the differentiable Warp rollout (Adam), and track
-the \emph{success rate} of two objectives as the rollout horizon grows (Fig.~\ref{fig:trajopt}); the
-integrable pendulum is the null control.
+each objective's \emph{normalized final cost}---the achieved cost as a fraction of the do-nothing
+baseline---as the rollout horizon grows (Fig.~\ref{fig:trajopt}); the integrable pendulum is the null
+control.
 
 The gradient of a single deterministic rollout is \emph{exact}, so optimisation succeeds well beyond
 the naive Lyapunov time. A \emph{forgiving} objective---swing the hand to upright, satisfied by a large
@@ -385,24 +386,27 @@ provably exists)---succeeds out to several Lyapunov times. The horizon does not 
 optimisation past $1/\lambda_1$.
 
 The precise objective nonetheless hits a sharp wall, at exactly the horizon Section~\ref{sec:A-horizon}
-predicts. Past $T\lambda_1\approx\log(1/\tau)$---the predictability horizon $1/\lambda_1$ carrying the
-same logarithmic factor in the target precision $\tau$ that set the SNR crossover---the success rate of
-precise reaching collapses from $\sim\!100\%$ to zero, and beyond it the optimiser ends \emph{worse}
-than doing nothing: the squared-error gradient inherits the $e^{2\lambda_1 T}$ rollout gain and the
-descent diverges. The collapse is genuinely chaotic---the integrable pendulum, optimised over identical
-horizons and step counts, never fails, and the forgiving swing-up on the same chaotic acrobot never
-fails. The wall is specific both to chaos and to objectives that demand precision.
+predicts. Past the predictability horizon---$1/\lambda_1$ carrying the same logarithmic factor in the
+achievable precision that set the SNR crossover, here $T\lambda_1\approx4$---the precise-reach cost
+rises \emph{through} the do-nothing baseline: the optimiser ends worse than zero control, its
+squared-error gradient inheriting the $e^{2\lambda_1 T}$ rollout gain until the descent diverges (to
+$\sim\!80\times$ baseline by $T\lambda_1=5$). The wall is genuinely chaotic---the integrable pendulum,
+optimised over identical horizons and step counts, stays orders of magnitude below the baseline
+throughout, as does the forgiving swing-up on the same chaotic acrobot. It is specific both to chaos
+and to objectives that demand precision.
 
 \begin{figure}[t]\centering
   \includegraphics[width=0.72\linewidth]{fig2.png}
   \caption{Optimisation through the differentiable simulator on the chaotic acrobot versus rollout
-  horizon $T\lambda_1$. Success rate (over random seeds) of three trajectory-optimisation settings: a
-  \emph{forgiving} objective (swing the hand up) and the \emph{integrable} pendulum's \emph{precise}
-  target-reaching succeed at all horizons, while the chaotic acrobot's \emph{precise} target-reaching
-  collapses from $100\%$ to $0\%$ at the predictability horizon $T\lambda_1\approx\log(1/\tau)$
-  (dashed; $\tau=10^{-2}$ the target tolerance), past which the $e^{2\lambda_1 T}$ gradient gain makes
-  the descent diverge. The horizon---with its logarithmic factor (Section~\ref{sec:A-horizon})---bounds
-  \emph{precise} differentiable-sim control; forgiving objectives and integrable dynamics show no wall.}
+  horizon $T\lambda_1$. Normalized final cost (achieved cost / do-nothing baseline; geometric mean over
+  reach targets, shaded $10$--$90\%$ band). A \emph{forgiving} objective (swing the hand up; green) and
+  the \emph{integrable} pendulum's \emph{precise} target-reaching (blue) stay orders of magnitude below
+  the do-nothing baseline (dotted) at every horizon, while the chaotic acrobot's \emph{precise}
+  target-reaching (red) rises through the baseline at the predictability horizon $T\lambda_1\approx4$
+  ($1/\lambda_1$ up to the logarithmic factor of Section~\ref{sec:A-horizon}) and blows up beyond it as
+  the $e^{2\lambda_1 T}$ gradient gain makes the descent diverge; the widening red band marks the loss
+  of reliability. The horizon bounds \emph{precise} differentiable-sim control; forgiving objectives
+  and integrable dynamics show no wall.}
   \label{fig:trajopt}
 \end{figure}
 
