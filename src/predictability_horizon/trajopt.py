@@ -194,6 +194,11 @@ def hand_height(state: Vec) -> float:
     return float(-(np.cos(state[0]) + np.cos(state[1])))
 
 
+def upright_cost(state: Vec) -> float:
+    """Terminal upright cost (1+cos θ₁)+(1+cos θ₂): 0 at upright, 4 hanging (matches the kernel)."""
+    return float((1.0 + np.cos(state[0])) + (1.0 + np.cos(state[1])))
+
+
 def optimize_swingup(
     system: System,
     x0: Vec,
@@ -229,16 +234,27 @@ def swingup_horizon_sweep(
     lr: float = 1.0,
     device: str = "cpu",
 ) -> dict[str, Any]:
-    """Final hand height (and # seeds reaching upright) across the horizon grid ``tlams``."""
+    """Per-horizon swing-up results: final hand height, #up, and the normalized terminal-upright cost.
+
+    ``cost_seeds`` = final upright cost / passive (u=0) upright cost — the swing-up analogue of the
+    reach ratio, so swing-up sits on the same normalized-cost axis as reaching (≪1 = succeeds).
+    """
     if lam1 is None:
         lam1 = measure_lambda1(system, x0, dt)
-    out: dict[str, Any] = {"lam1": lam1, "tlams": [], "steps": [], "height_mean": [], "height_seeds": [], "n_up": []}
+    out: dict[str, Any] = {
+        "lam1": lam1, "tlams": [], "steps": [], "height_mean": [], "height_seeds": [],
+        "n_up": [], "cost_seeds": [],
+    }
     for tl in tlams:
         T = _steps(tl, lam1, dt)  # noqa: N806
-        hs = [hand_height(optimize_swingup(system, x0, dt, T, iters=iters, lr=lr, seed=sd, device=device)[1]) for sd in range(n_seed)]
+        passive = rollout(system.step_kernel, x0, np.zeros(T), system.default_params, dt, T)[T]  # type: ignore[arg-type]
+        c0 = upright_cost(passive) + 1e-12
+        finals = [optimize_swingup(system, x0, dt, T, iters=iters, lr=lr, seed=sd, device=device)[1] for sd in range(n_seed)]
+        hs = [hand_height(f) for f in finals]
         out["tlams"].append(tl)
         out["steps"].append(T)
         out["height_mean"].append(float(np.mean(hs)))
         out["height_seeds"].append(hs)
         out["n_up"].append(int(sum(1 for h in hs if h > 1.5)))
+        out["cost_seeds"].append([upright_cost(f) / c0 for f in finals])
     return out

@@ -86,53 +86,70 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
     return out
 
 
-def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
-    """One-panel Fig 2: optimisation success rate vs horizon T·λ₁ for three trajopt settings.
+def _geomean_band(seeds_per_horizon: list[list[float]]) -> tuple[Any, Any, Any]:
+    """Per-horizon geometric mean and 10-90th percentile band of a positive, heavy-tailed quantity.
 
-    Acrobot *precise* target-reaching cliffs from 100% to 0% at T·λ₁ ≈ log(1/τ) (the §4.3
-    predictability horizon with its log factor); the acrobot *forgiving* swing-up and the *integrable*
-    pendulum's precise reach show no wall. The horizon bounds precise differentiable-sim control,
-    not all of it. All three curves share the acrobot's Lyapunov axis at matched step counts.
+    Averaging the normalized cost in log space over reach targets smooths the curve naturally and
+    keeps its magnitude; the band shows the seed-to-seed reliability spread.
+    """
+    g, lo, hi = [], [], []
+    for s in seeds_per_horizon:
+        a = np.clip(np.asarray(s, dtype=float), 1e-12, None)
+        g.append(float(np.exp(np.mean(np.log(a)))))
+        lo.append(float(np.percentile(a, 10)))
+        hi.append(float(np.percentile(a, 90)))
+    return np.array(g), np.array(lo), np.array(hi)
+
+
+def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
+    """One-panel Fig 2: normalized final cost vs horizon T·λ₁ for three trajectory-optimisation settings.
+
+    Cost = final / do-nothing-baseline (≪1 succeeds; ≥1 no better than doing nothing), geometric-mean
+    over reach targets with a 10-90% band. The acrobot's *precise* reach rises through the
+    do-nothing baseline at the predictability horizon (the §4.3 horizon with its log factor) and blows
+    up beyond it (e^{2λ₁T} gradient gain); the *forgiving* swing-up and the *integrable* pendulum's
+    precise reach stay far below the baseline at every horizon. All curves share the acrobot's
+    Lyapunov axis at matched step counts.
     """
     acro = SYSTEMS["acrobot"]
     pend = SYSTEMS["pendulum"]
     x0a = np.array([2.5, 0.0, 0.0, 0.0])
     x0p = np.array([2.0, 0.0])
-    tau = 1e-2  # reach success tolerance: final/baseline < tau
     if fast:
-        dt, tlams, n_acro, n_ctrl, ri, si = 5e-3, [1.0, 2.0, 3.0, 4.0, 5.0], 3, 3, 100, 100
+        dt, tlams, n_acro, n_ctrl, ri, si = 5e-3, [1.0, 2.0, 3.0, 4.0, 5.0], 8, 6, 150, 150
     else:
-        dt, tlams, n_acro, n_ctrl, ri, si = 5e-4, [1.0, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0], 10, 5, 250, 250
+        dt, tlams, n_acro, n_ctrl, ri, si = 5e-4, [1.0, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0], 12, 6, 250, 250
     lam1 = measure_lambda1(acro, x0a, dt)
     ra = reach_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=n_acro, iters=ri)
     rp = reach_horizon_sweep(pend, x0p, dt, tlams, lam1=lam1, n_seed=n_ctrl, iters=ri)
     su = swingup_horizon_sweep(acro, x0a, dt, tlams, lam1=lam1, n_seed=n_ctrl, iters=si)
 
-    def reach_success(res: dict[str, Any]) -> list[float]:
-        return [100.0 * float(np.mean(np.asarray(s) < tau)) for s in res["ratio_seeds"]]
-
-    acro_reach = reach_success(ra)
-    pend_reach = reach_success(rp)
-    swing = [100.0 * n / n_ctrl for n in su["n_up"]]
+    ag, alo, ahi = _geomean_band(ra["ratio_seeds"])
+    pg, plo, phi = _geomean_band(rp["ratio_seeds"])
+    sg, slo, shi = _geomean_band(su["cost_seeds"])
     tl = np.asarray(tlams)
     print(
-        f"[fig2] lam1={lam1:.3f} | acro_reach%={acro_reach} | pend_reach%={pend_reach} | swing%={swing}"
+        f"[fig2] lam1={lam1:.3f} | acro_reach_geo={ag.tolist()} | "
+        f"pend_reach_geo={pg.tolist()} | swing_cost_geo={sg.tolist()}"
     )
 
-    fig, ax = plt.subplots(figsize=(7.2, 4.6))
-    ax.plot(tl, swing, "o-", color="C2", label="acrobot — swing-up (forgiving)")
-    ax.plot(tl, pend_reach, "s-", color="C0", label="pendulum — precise reach (integrable)")
-    ax.plot(tl, acro_reach, "D-", color="C3", label="acrobot — precise reach (chaotic)")
-    thoriz = float(np.log(1.0 / tau))  # predicted wall in T·λ₁ units = log(1/τ)
-    ax.axvline(thoriz, ls="--", color="k", lw=1)
-    ax.text(thoriz * 1.01, 55, r"$T\lambda_1=\log(1/\tau)$", rotation=90, va="center", fontsize=9)
+    fig, ax = plt.subplots(figsize=(7.4, 4.8))
+    for g, lo, hi, c, mk, lab in (
+        (sg, slo, shi, "C2", "o", "acrobot — swing-up (forgiving)"),
+        (pg, plo, phi, "C0", "s", "pendulum — precise reach (integrable)"),
+        (ag, alo, ahi, "C3", "D", "acrobot — precise reach (chaotic)"),
+    ):
+        ax.fill_between(tl, lo, hi, color=c, alpha=0.15)
+        ax.plot(tl, g, mk + "-", color=c, label=lab)
+    ax.axhline(1.0, ls=":", color="grey", lw=1)
+    ax.text(tl[0], 1.4, "do-nothing baseline", fontsize=8, color="grey")
+    ax.set_yscale("log")
     ax.set_xlabel(r"horizon $T\lambda_1$ (Lyapunov times)")
-    ax.set_ylabel("optimisation success rate (%)")
-    ax.set_ylim(-5, 108)
+    ax.set_ylabel("final cost / do-nothing baseline")
     ax.set_title(
         rf"Predictability horizon bounds precise diff-sim control ($\lambda_1={lam1:.2f}$/s)"
     )
-    ax.legend(loc="center left", fontsize=9)
+    ax.legend(loc="upper left", fontsize=9)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
