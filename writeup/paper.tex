@@ -416,7 +416,8 @@ The consequence is a refined curse of chaos for differentiable
 simulation~\cite{suh2022differentiable}. The predictability horizon---with its logarithmic
 factor---bounds \emph{precise} control through a differentiable simulator: when the objective pins a
 specific terminal state, the chaotically amplified gradient can no longer deliver it past
-$T\sim\log(1/\tau)/\lambda_1$. It does not bound differentiable-sim optimisation in general---an exact
+$T\sim\log(1/\varepsilon)/\lambda_1$ in the target precision $\varepsilon$. It does not bound
+differentiable-sim optimisation in general---an exact
 single-trajectory gradient solves a forgiving objective at any horizon, and an integrable system has no
 wall. This is the operational face of the signal-to-noise collapse of Section~\ref{sec:A-horizon},
 whose squared-norm objective is itself a precise one; the wall here is for open-loop single-shooting,
