@@ -29,7 +29,7 @@ def test_reach_fails_past_log_horizon():
     # The wall: past T·lambda1 ~ log(1/tau) the e^{2 lambda1 T} gain defeats the optimiser; precise
     # reach recovers nothing -- final cost is of order the do-nothing baseline.
     r = reach_ratio(SYSTEMS["acrobot"], X0A, DT, STEPS_WALL, iters=200, seed=0)
-    assert r > 1e-1
+    assert r > 5e-1  # recovers nothing: final cost ≈ (or worse than) the do-nothing baseline
 
 
 def test_pendulum_no_wall_at_same_horizon():

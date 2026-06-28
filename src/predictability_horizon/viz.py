@@ -116,7 +116,7 @@ def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
     x0a = np.array([2.5, 0.0, 0.0, 0.0])
     x0p = np.array([2.0, 0.0])
     if fast:
-        dt, tlams, n_acro, n_ctrl, ri, si = 5e-3, [1.0, 2.0, 3.0, 4.0, 5.0], 8, 6, 150, 150
+        dt, tlams, n_acro, n_ctrl, ri, si = 5e-3, [1.0, 3.0, 5.0], 4, 3, 80, 80
     else:
         dt, tlams, n_acro, n_ctrl, ri, si = 5e-4, [1.0, 2.0, 3.0, 3.5, 4.0, 4.5, 5.0], 12, 6, 250, 250
     lam1 = measure_lambda1(acro, x0a, dt)

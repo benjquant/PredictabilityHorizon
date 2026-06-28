@@ -385,10 +385,11 @@ a specific feasible terminal state $x_T^\star$ (one a known control attains, so 
 provably exists)---succeeds out to several Lyapunov times. The horizon does not simply forbid
 optimisation past $1/\lambda_1$.
 
-The precise objective nonetheless hits a sharp wall, at exactly the horizon Section~\ref{sec:A-horizon}
-predicts. Past the predictability horizon---$1/\lambda_1$ carrying the same logarithmic factor in the
-achievable precision that set the SNR crossover, here $T\lambda_1\approx4.6$---the precise-reach cost
-rises \emph{through} the do-nothing baseline: the optimiser ends worse than zero control, its
+The precise objective nonetheless hits a sharp wall. Section~\ref{sec:A-horizon} placed the bare
+gradient signal-to-noise crossover at $T\lambda_1\sim1$; the trajectory-optimisation wall sits further
+out, at that crossover \emph{times the logarithmic factor in the achievable precision}---the
+predictability time $\lambda_1^{-1}\log(1/\varepsilon)$ of Section~\ref{sec:bg-lyapunov}, here
+$T\lambda_1\approx4.6$. Past it the precise-reach cost rises \emph{through} the do-nothing baseline: the optimiser ends worse than zero control, its
 squared-error gradient inheriting the $e^{2\lambda_1 T}$ rollout gain until the descent diverges (to
 $\sim\!300\times$ baseline by $T\lambda_1=5$). The wall is genuinely chaotic---the integrable pendulum,
 optimised over identical horizons and step counts, stays orders of magnitude below the baseline
@@ -406,7 +407,8 @@ and to objectives that demand precision.
   ($1/\lambda_1$ up to the logarithmic factor of Section~\ref{sec:A-horizon}) and blows up beyond it as
   the $e^{2\lambda_1 T}$ gradient gain makes the descent diverge; the widening red band marks the loss
   of reliability. The horizon bounds \emph{precise} differentiable-sim control; forgiving objectives
-  and integrable dynamics show no wall.}
+  and integrable dynamics show no wall. The acrobot $\lambda_1\approx1.28$ is re-measured at this
+  initial condition (cf.\ the Benettin $1.18$ of Section~\ref{sec:A-law}; finite-time scatter).}
   \label{fig:trajopt}
 \end{figure}
 
