@@ -118,7 +118,7 @@ with $M_T$ the rollout Jacobian of Eq.~\eqref{eq:rollout-jacobian}. Reverse-mode
 
 This is not a peculiarity of one loss. The three canonical uses of a differentiable simulator all backpropagate through the rollout and so all carry the factor $M_T$: system identification differentiates the trajectory with respect to physical parameters, trajectory optimisation differentiates it with respect to a control sequence, and first-order (analytic) policy gradients differentiate it with respect to policy parameters~\cite{suh2022differentiable,parmas2018pipps}. In each case the gradient inherits whatever $M_T$ does.
 
-What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapunov exponent, Eq.~\eqref{eq:lambda1}, the rollout Jacobian stretches a generic vector as $\norm{M_T}\sim e^{\lambda_1 T}$, so on a chaotic system ($\lambda_1>0$) the gradient magnitude grows exponentially in the horizon. The useful signal does not grow with it: the exponentially large contributions come from the most sensitive directions and inflate both the gradient and its variance, so beyond $T\sim 1/\lambda_1$ the analytic gradient is dominated by chaotic amplification rather than by the quantity one meant to optimise~\cite{metz2021gradients,parmas2018pipps,suh2022differentiable}. This is the \emph{curse of chaos} for differentiable simulators, and it is the precise statement Part~A measures: the same $1/\lambda_1$ horizon that bounds prediction also bounds the useful length of a differentiable rollout.
+What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapunov exponent, Eq.~\eqref{eq:lambda1}, the rollout Jacobian stretches a generic vector as $\norm{M_T}\sim e^{\lambda_1 T}$ (up to a subexponential prefactor, all that survives when $\lambda_1=0$; Section~\ref{sec:A-law}), so on a chaotic system ($\lambda_1>0$) the gradient magnitude grows exponentially in the horizon. The useful signal does not grow with it: the exponentially large contributions come from the most sensitive directions and inflate both the gradient and its variance, so beyond $T\sim 1/\lambda_1$ the analytic gradient is dominated by chaotic amplification rather than by the quantity one meant to optimise~\cite{metz2021gradients,parmas2018pipps,suh2022differentiable}. This is the \emph{curse of chaos} for differentiable simulators, and it is the precise statement Part~A measures: the same $1/\lambda_1$ horizon that bounds prediction also bounds the useful length of a differentiable rollout.
 
 Equation~\eqref{eq:loss-grad} also gives a second, independent handle on $\lambda_1$. By Eq.~\eqref{eq:lambda1}, the growth rate of the gradient gain $\norm{M_T}$ with $T$ is itself a finite-horizon estimate of $\lambda_1$---distinct from the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov}, computed from the same orbit, and expected to agree with it as $T\to\infty$ by Oseledets. Section~\ref{sec:m-consistency} makes this comparison the basis of Part~A.
 
@@ -274,8 +274,8 @@ Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lam
 growth rate.
 
 Two systems play distinct roles. The chaotic \emph{acrobot} is the workhorse and carries every
-$\lambda_1$ claim; the integrable \emph{pendulum} ($\lambda_1\approx0$) is the null contrast, showing
-the effect vanishes when the dynamics are not chaotic.
+$\lambda_1$ claim; the integrable \emph{pendulum} ($\lambda_1=0$) is the null contrast, whose gradient
+grows only linearly, never exponentially.
 
 Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the
 matched pendulum--acrobot pair; (ii) show it holds across the whole integrable--chaotic range, by
@@ -286,39 +286,59 @@ consequence for trajectory optimisation through the simulator, where the horizon
 control on the acrobot but a forgiving swing-up sails through it.
 
 \subsection{The gradient-gain growth law}\label{sec:A-law}
-% slope of log||M_T|| = lambda_1; pendulum integrable (no blow-up) vs acrobot chaotic (e^{lambda_1 T}); Fig 1.
-This subsection operationalises the bridge of Section~\ref{sec:bg-jacobian}---that a differentiable
-simulator's gradient carries the factor $\norm{M_T}\sim e^{\lambda_1 T}$---and reads its rate off the
-slope estimator of Section~\ref{sec:m-consistency}. For each system we plot $\ln\norm{M_T}_2$ against
-the horizon $T$ (Fig.~\ref{fig:gradient-law}); the slope is the gradient-gain rate. On the chaotic
-acrobot the gain grows exponentially at $1.07\,\mathrm{s}^{-1}$, matching the independently measured
-Benettin $\lambda_1 = 1.18\,\mathrm{s}^{-1}$; on the integrable pendulum both rates vanish
-($\lambda_1\approx 0.08$, slope $\approx 0.06\,\mathrm{s}^{-1}$) and the gain is sub-exponential. The
-gradient gain thus blows up \emph{at the Lyapunov rate} on chaotic dynamics, and not at all on
-integrable ones.
+% integrable -> linear (lambda_1=0); chaotic -> exponential e^{lambda_1 T}; analytic shear argument; Fig 1.
+The rollout-Jacobian factor $\norm{M_T}_2$ that every simulator gradient carries
+(Section~\ref{sec:bg-jacobian}) has a leading exponential form $\norm{M_T}_2\sim e^{\lambda_1 T}$; how
+it grows once that factor degenerates is precisely the integrable--chaotic distinction
+(Fig.~\ref{fig:gradient-law}). On the chaotic acrobot the gain is \emph{exponential}: a log-linear fit
+past the initial transient gives $1.29\,\mathrm{s}^{-1}$, matching the Benettin exponent
+$\lambda_1 = 1.28\,\mathrm{s}^{-1}$ measured independently on the same orbit. On the integrable pendulum
+the gain is \emph{linear}, $\norm{M_T}_2 \propto T$ with $\lambda_1 = 0$ exactly---the log--log inset
+shows the unit power law. The gradient gain thus blows up at the Lyapunov rate on chaotic dynamics, and
+grows only \emph{polynomially}, never exponentially, on integrable ones.
 
 \begin{figure}[t]\centering
   \includegraphics[width=\linewidth]{fig1.png}
-  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$ (semilog).
-  Integrable pendulum (left): sub-exponential, $\lambda_1\approx 0$. Chaotic acrobot (right):
-  exponential growth whose log-slope ($1.07\,\mathrm{s}^{-1}$) matches the Benettin $\lambda_1$
-  ($1.18\,\mathrm{s}^{-1}$).}
+  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$ in seconds
+  (semilog), each panel over its own physical-time window. Integrable pendulum (left): \emph{linear}
+  growth $\norm{M_T}_2\propto T$ with $\lambda_1=0$ (inset: log--log slope $1$); the quoted finite-time
+  $\lambda_1$ are window artifacts that decay to $0$. Chaotic acrobot (right): \emph{exponential}
+  growth, log-slope $1.29\,\mathrm{s}^{-1}$ matching the same-orbit Benettin
+  $\lambda_1=1.28\,\mathrm{s}^{-1}$. Fits are taken past the initial transient (solid; dashed
+  extrapolation).}
   \label{fig:gradient-law}
 \end{figure}
 
-Two points fix the interpretation. First, the rate is a \emph{single} factor of $\lambda_1$: we fit
-the Jacobian norm $\norm{M_T}_2$, which grows as $e^{\lambda_1 T}$, so its log-slope is $\lambda_1$;
-a squared quantity---a squared-loss objective, or the squared separation $\norm{\delta x_T}^2$---would
-grow as $e^{2\lambda_1 T}$ and read $2\lambda_1$ instead. Second, the coincidence of the two rates is
-the \emph{consistency relation} of Section~\ref{sec:m-consistency}, not an identity: slope and Benettin
-exponent are exact equals only for a constant-Jacobian map, and on the acrobot they agree to within the
-finite-time scatter of the higher-variance slope ($\approx 0.1\,\mathrm{s}^{-1}$, about $10\%$).
+The linear law is a property of integrable motion, not an accident of this orbit. Every orbit of the
+pendulum is periodic, and because the period depends on amplitude, neighbouring orbits run at slightly
+different frequencies. A perturbation that shifts the energy therefore moves onto an orbit that drifts
+steadily out of phase, the lag growing \emph{linearly} in time; that growing lag is what $\norm{M_T}_2$
+measures, so $\norm{M_T}_2\propto T$.\footnote{In action--angle coordinates $(I,\varphi)$ the action
+$I$ is conserved and the angle advances as $\varphi_T=\varphi_0+\omega(I)\,T$, so the variational matrix
+is the pure shear $\left(\begin{smallmatrix}1 & 0\\ \omega'(I)\,T & 1\end{smallmatrix}\right)$:
+area-preserving ($\det=1$), top singular value $\sigma_{\max}\sim|\omega'(I)|\,T$, with $\omega=2\pi/P$.}
+The rate is the \emph{non-isochronicity}---the change of period with energy, $P'(E)$---which vanishes
+for an isochronous system such as the harmonic oscillator, whose gain stays bounded. Because the growth
+is only linear, $\lambda_1=\lim_{T\to\infty}T^{-1}\ln\norm{M_T}_2=0$ exactly; a finite-horizon slope
+returns not zero but a small positive number \emph{decaying} with the window as $\ln T/T$
+($0.05$--$0.08\,\mathrm{s}^{-1}$ over $40\,\mathrm{s}$ here)---a finite-time artifact of fitting an
+exponential to a line, not a Lyapunov exponent.
+
+Two points fix the chaotic case. First, the rate is a \emph{single} factor of $\lambda_1$: we fit
+$\norm{M_T}_2$, which grows as $e^{\lambda_1 T}$, so its log-slope is $\lambda_1$; a squared
+quantity---a squared-loss objective, or the squared separation $\norm{\delta x_T}^2$---would grow as
+$e^{2\lambda_1 T}$ and read $2\lambda_1$. Second, the coincidence of slope and Benettin exponent is the
+\emph{consistency relation} of Section~\ref{sec:m-consistency}, not an identity: the two are exact
+equals only for a constant-Jacobian map, and on a single acrobot orbit they agree only to within the
+finite-time scatter of the exponent (here $\sim\!10\%$). The scatter-controlled statement
+slope~$=\lambda_1$ across the whole integrable--chaotic range is established in
+Section~\ref{sec:A-regimes}.
 
 \subsection{The law holds across regimes}\label{sec:A-regimes}
 % slope tracks Benettin lambda_1 across an acrobot energy sweep + pendulum, corr ~0.99; Fig 5.
 Section~\ref{sec:A-law} fixed the law on two orbits; here we vary the dynamics continuously. We sweep
-the acrobot across initial energies ($\theta_1$ from $0.5$ to $3.0$, raising $\lambda_1$ from near
-zero to $\sim\!1.2\,\mathrm{s}^{-1}$) and add the integrable pendulum, and for each we compare the
+the acrobot across initial energies ($\theta_1$ from $0.5$ to $3.0$, with $\lambda_1$ spanning from near
+zero to $\sim\!1.3\,\mathrm{s}^{-1}$, non-monotonically) and add the integrable pendulum, and for each we compare the
 gradient-gain slope against the Benettin $\lambda_1$ (Fig.~\ref{fig:slope-vs-lambda}). The points
 cluster on the line slope $=\lambda_1$: across the integrable-to-chaotic range the two rates correlate
 at $0.99$, with best-fit slope $0.96$ (ideal $1$) and near-zero intercept. The gradient-gain rate is
@@ -407,8 +427,8 @@ and to objectives that demand precision.
   ($1/\lambda_1$ up to the logarithmic factor of Section~\ref{sec:A-horizon}) and blows up beyond it as
   the $e^{2\lambda_1 T}$ gradient gain makes the descent diverge; the widening red band marks the loss
   of reliability. The horizon bounds \emph{precise} differentiable-sim control; forgiving objectives
-  and integrable dynamics show no wall. The acrobot $\lambda_1\approx1.28$ is re-measured at this
-  initial condition (cf.\ the Benettin $1.18$ of Section~\ref{sec:A-law}; finite-time scatter).}
+  and integrable dynamics show no wall. The acrobot $\lambda_1\approx1.28$ matches the
+  Benettin $\lambda_1$ of Section~\ref{sec:A-law}.}
   \label{fig:trajopt}
 \end{figure}
 

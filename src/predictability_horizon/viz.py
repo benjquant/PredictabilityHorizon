@@ -34,52 +34,90 @@ from predictability_horizon.worldmodel import (
 )
 
 
-def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
-    """Two-panel semilogy of rollout-Jacobian norm vs horizon: pendulum (integrable) and acrobot (chaotic).
-
-    Shows the clean integrable-vs-chaotic contrast:
-    - Pendulum: sub-exponential growth (λ₁≈0), no fit line drawn.
-    - Acrobot: exponential growth tracking e^{λ₁T}, steep slope.
-    """
-    specs: list[tuple[str, np.ndarray, np.ndarray]] = [
-        ("pendulum", np.array([2.0, 0.0]), np.arange(1000, 9000, 1000)),
-        ("acrobot", np.array([2.5, 0.0, 0.0, 0.0]), np.arange(1000, 9000, 1000)),
-    ]
-    fig, axes = plt.subplots(1, 2, figsize=(9, 4))
-    for ax, (name, x0, horizons) in zip(axes, specs, strict=True):
-        sys = SYSTEMS[name]
-        h = horizons[:3] if fast else horizons
-        res = gradient_law(
-            cast(wp.Kernel, sys.step_kernel),
-            x0,
-            sys.default_params,
-            sys.suggested_dt,
-            h,
-            sys.dim,
-            sys.jacobian,
-        )
-        lam_t = res.lambda1_per_step / sys.suggested_dt  # per unit time
-        slope_t = res.slope_per_step / sys.suggested_dt  # per unit time
-
-        ax.semilogy(res.horizons, res.grad_norms, "o", label="measured")
-
-        if name == "acrobot":
-            # Exponential fit tracks the growth well for chaotic dynamics
-            intercept = np.log(res.grad_norms[0]) - res.slope_per_step * res.horizons[0]
-            fit = np.exp(np.polyval([res.slope_per_step, intercept], res.horizons))
-            ax.semilogy(res.horizons, fit, "-", alpha=0.7, label=r"$e^{\lambda_1 T}$ fit")
-            ax.legend(fontsize=8)
-
-        ax.set_title(f"{name}\n" r"$\lambda_1$" f"≈{lam_t:.2f}/s   slope≈{slope_t:.2f}/s")
-        ax.set_xlabel("rollout steps T")
-
-    axes[0].set_ylabel(r"$\|\partial x_T/\partial x_0\|_2$")
-    fig.suptitle(
-        r"Gradient gain $\|\partial x_T/\partial x_0\|_2$ blows up at rate $\lambda_1$:"
-        "\nexponential for the chaotic acrobot, sub-exponential for the integrable pendulum",
-        fontsize=10,
+def _grad_law_on(name: str, x0: np.ndarray, t_max: float, n: int):
+    """Run ``gradient_law`` for ``name`` over physical horizons up to ``t_max`` seconds."""
+    sys = SYSTEMS[name]
+    dt = sys.suggested_dt
+    horizons = np.unique(np.round(np.linspace(t_max / n, t_max, n) / dt).astype(int))
+    horizons = horizons[horizons >= 1]
+    res = gradient_law(
+        cast(wp.Kernel, sys.step_kernel), x0, sys.default_params, dt, horizons, sys.dim, sys.jacobian
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.90))
+    return res, dt
+
+
+def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
+    """Two-panel semilog of rollout-Jacobian norm ‖∂x_T/∂x₀‖₂ vs horizon T (seconds).
+
+    The integrable-vs-chaotic contrast is *linear vs exponential* growth (not "flat vs
+    blows up"), shown over each system's own physical-time window because the two laws
+    live on different timescales:
+
+    - Pendulum (integrable, λ₁=0): ‖M_T‖ grows *linearly* (anharmonic shear); the overlaid
+      line is the linear law a·t (a log curve on this semilog axis). The finite-time Benettin
+      estimate is a window artifact still decaying toward 0 (~ln T / T).
+    - Acrobot (chaotic, λ₁>0): genuine exponential e^{λ₁T}; λ₁ is fit past an initial
+      transient (T ≥ cutoff) and matches the Benettin/QR exponent within finite-time scatter.
+    """
+    pend_tmax, acro_tmax = (8.0, 2.0) if fast else (40.0, 8.0)
+    n_p, n_a = (6, 6) if fast else (32, 20)
+    fig, (axp, axa) = plt.subplots(1, 2, figsize=(9.5, 4.2))
+
+    # --- pendulum (left): linear law (λ₁=0); inset proves linearity (log-log slope 1) ---
+    resp, dtp = _grad_law_on("pendulum", np.array([2.0, 0.0]), pend_tmax, n_p)
+    tp = resp.horizons * dtp
+    sp = resp.grad_norms
+    axp.semilogy(tp, sp, "o", ms=4, color="C0", label="measured")
+    cut_p = min(5.0, 0.4 * pend_tmax)  # fit on the post-transient part
+    m_p = tp > cut_p
+    a, b = np.polyfit(tp[m_p], sp[m_p], 1)  # linear law (the physics)
+    lam_sp = np.polyfit(tp[m_p], np.log(sp[m_p]), 1)[0]  # naive slope-method estimate
+    tl = np.linspace(tp[0], tp[-1], 200)
+    lin = np.clip(a * tl + b, 1e-12, None)
+    axp.semilogy(tl[tl >= cut_p], lin[tl >= cut_p], "-", color="darkcyan", lw=1.6,
+                 label=r"$\|M_T\|\propto t$  ($\lambda_1=0$)")
+    axp.semilogy(tl[tl < cut_p], lin[tl < cut_p], "--", color="darkcyan", lw=1.0, alpha=0.45)
+    lam_qr_p = resp.lambda1_per_step / dtp
+    axp.set_title("pendulum — integrable")
+    axp.set_xlabel(r"rollout horizon $T$ (s)")
+    axp.set_ylabel(r"$\|M_T\|_2 \equiv \|\partial x_T/\partial x_0\|_2$")
+    axp.text(0.045, 0.035, rf"finite-time $\lambda_1$:  Benettin {lam_qr_p:.2f},  slope {lam_sp:.2f}",
+             transform=axp.transAxes, va="bottom", ha="left", fontsize=7.5, color="0.4")
+    axp.legend(fontsize=8, loc="upper left")
+    axins = axp.inset_axes((0.60, 0.12, 0.37, 0.40))  # log-log view: linear growth -> slope-1 line
+    axins.loglog(tp, sp, "o", ms=2.0, color="C0")
+    axins.loglog(tp, sp[-1] * (tp / tp[-1]), "--", color="0.4", lw=1.0)
+    axins.set_title(r"log-log: slope 1 $\Rightarrow \propto t$", fontsize=6.5)
+    axins.tick_params(labelsize=6)
+
+    # --- acrobot (right): exponential law (slope fit), Benettin cross-check ---
+    resa, dta = _grad_law_on("acrobot", np.array([2.5, 0.0, 0.0, 0.0]), acro_tmax, n_a)
+    ta = resa.horizons * dta
+    axa.semilogy(ta, resa.grad_norms, "o", ms=4, color="crimson", label="measured")
+    cut = min(2.0, 0.25 * acro_tmax)  # fit past the initial transient
+    m_a = ta >= cut
+    lam, c = np.polyfit(ta[m_a], np.log(resa.grad_norms[m_a]), 1)  # slope-method fit
+    tl = np.linspace(ta[0], ta[-1], 200)
+    ex = np.exp(lam * tl + c)
+    axa.semilogy(tl[tl >= cut], ex[tl >= cut], "-", color="coral", lw=1.6,
+                 label=r"$\|M_T\|\propto e^{\lambda_1 T}$")
+    axa.semilogy(tl[tl < cut], ex[tl < cut], "--", color="coral", lw=1.0, alpha=0.45)
+    lam_qr_a = resa.lambda1_per_step / dta  # independent Benettin exponent
+    axa.set_title("acrobot — chaotic")
+    axa.set_xlabel(r"rollout horizon $T$ (s)")
+    axa.text(0.045, 0.96,
+             rf"Benettin $\lambda_1={lam_qr_a:.2f}\,\mathrm{{s}}^{{-1}}$" "\n"
+             rf"slope $\lambda_1={lam:.2f}\,\mathrm{{s}}^{{-1}}$",
+             transform=axa.transAxes, va="top", ha="left", fontsize=8, color="0.45", linespacing=1.6)
+    axa.legend(fontsize=8, loc="lower right")
+
+    print(f"[fig1] pendulum: a={a:.3f}/s slope={lam_sp:.3f}/s Benettin={lam_qr_p:.3f}/s | "
+          f"acrobot: slope={lam:.3f}/s Benettin={lam_qr_a:.3f}/s (fit T>={cut:.0f}s)")
+    fig.suptitle(
+        r"Rollout-Jacobian gain $\|M_T\|_2$: linear (integrable) vs exponential (chaotic)",
+        fontsize=11,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -374,7 +412,7 @@ def make_fig5_slope_vs_lambda(out: Path, fast: bool = False) -> Path:
     """Gradient-gain slope tracks λ₁ across integrable→chaotic regimes.
 
     Points: pendulum (integrable, λ₁≈0) and acrobot at a sweep of initial energies
-    (rising θ₁ → rising λ₁ up to ~1.2/s). Plotted slope-vs-λ₁ clusters on y=x.
+    (the θ₁ sweep takes λ₁ up to ~1.3/s, non-monotonically). Plotted slope-vs-λ₁ clusters on y=x.
     Cartpole is intentionally excluded (λ₁ is regime-dependent/ill-defined for cartpole;
     the acrobot energy sweep already spans the integrable→chaotic transition).
     X-error bars show finite-time window scatter — an honest representation of the
