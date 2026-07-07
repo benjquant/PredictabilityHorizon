@@ -14,10 +14,17 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 
+from predictability_horizon.core import GradientLawResult
 from predictability_horizon.experiments import gradient_snr_vs_horizon, slope_vs_lambda_points
 from predictability_horizon.gradient_law import gradient_law
 from predictability_horizon.lyapunov import lyapunov_spectrum
-from predictability_horizon.systems import SYSTEMS, acrobot, cartpole, pendulum  # noqa: F401
+from predictability_horizon.systems import (  # noqa: F401  (register acrobot/cartpole/henon_heiles/pendulum)
+    SYSTEMS,
+    acrobot,
+    cartpole,
+    henon_heiles,
+    pendulum,
+)
 from predictability_horizon.trajopt import (
     measure_lambda1,
     reach_horizon_sweep,
@@ -34,7 +41,7 @@ from predictability_horizon.worldmodel import (
 )
 
 
-def _grad_law_on(name: str, x0: np.ndarray, t_max: float, n: int):
+def _grad_law_on(name: str, x0: np.ndarray, t_max: float, n: int) -> tuple[GradientLawResult, float]:
     """Run ``gradient_law`` for ``name`` over physical horizons up to ``t_max`` seconds."""
     sys = SYSTEMS[name]
     dt = sys.suggested_dt
@@ -411,10 +418,12 @@ def _finite_time_lambda_std(
 def make_fig5_slope_vs_lambda(out: Path, fast: bool = False) -> Path:
     """Gradient-gain slope tracks λ₁ across integrable→chaotic regimes.
 
-    Points: pendulum (integrable, λ₁≈0) and acrobot at a sweep of initial energies
-    (the θ₁ sweep takes λ₁ up to ~1.3/s, non-monotonically). Plotted slope-vs-λ₁ clusters on y=x.
-    Cartpole is intentionally excluded (λ₁ is regime-dependent/ill-defined for cartpole;
-    the acrobot energy sweep already spans the integrable→chaotic transition).
+    Points: pendulum (integrable, λ₁≈0), acrobot at a sweep of initial energies (θ₁ sweep,
+    λ₁ up to ~1.3/s, non-monotonic), and Hénon-Heiles at a sweep of energies — a second,
+    independent chaotic system (a smooth galactic potential, λ₁ up to ~0.13). All cluster on y=x.
+    Units are each system's own inverse time (pendulum/acrobot in s⁻¹; Hénon-Heiles is
+    dimensionless), so the y=x line, slope = λ₁, is the unit-free statement of the law.
+    Cartpole is intentionally excluded (λ₁ is regime-dependent/ill-defined for cartpole).
     X-error bars show finite-time window scatter — an honest representation of the
     finite-time Lyapunov uncertainty.
     """
@@ -455,6 +464,29 @@ def make_fig5_slope_vs_lambda(out: Path, fast: bool = False) -> Path:
         }
     )
 
+    # --- Hénon-Heiles: a second, independent chaotic system (a smooth galactic potential) ---
+    # lambda_1 is O(0.1) and IC-dependent (mixed phase space): chaotic-sea ICs, long horizons.
+    from predictability_horizon.systems.henon_heiles import chaotic_sea_ic
+
+    hh = SYSTEMS["henon_heiles"]
+    hh_energies: tuple[float, ...] = (0.13, 0.16) if fast else (0.11, 0.13, 0.145, 0.16)
+    hh_horizons: npt.NDArray[np.int_] = (
+        np.arange(500, 2500, 500) if fast else np.arange(2000, 14000, 2000)
+    )
+    for hh_e in hh_energies:
+        specs.append(
+            {
+                "name": f"HH E={hh_e}",
+                "step_kernel": hh.step_kernel,
+                "x0": chaotic_sea_ic(hh_e, hh.default_params),
+                "params": hh.default_params,
+                "dt": hh.suggested_dt,
+                "dim": 4,
+                "horizons": hh_horizons,
+                "jacobian": hh.jacobian,
+            }
+        )
+
     pts = slope_vs_lambda_points(specs)
     # x-error = finite-time window scatter of λ₁. The plotted point (λ₁ from gradient_law's
     # full rollout) and this error bar are independent but consistent estimators of the same
@@ -465,9 +497,10 @@ def make_fig5_slope_vs_lambda(out: Path, fast: bool = False) -> Path:
     lims = max(0.2, max(max(pt[1] for pt in pts), max(pt[2] for pt in pts)) * 1.15)
     ax.plot([0, lims], [0, lims], "k--", alpha=0.5, label="slope = λ₁")
     for (name, lam, slope), xe in zip(pts, xerr, strict=True):
-        ax.errorbar(lam, slope, xerr=xe, fmt="o", capsize=3, zorder=3, label=name)
-    ax.set_xlabel("measured λ₁ (Benettin, /s)   [x-err = finite-time window scatter]")
-    ax.set_ylabel("gradient-gain slope (/s)")
+        mk = "^" if name.startswith("HH") else "o"
+        ax.errorbar(lam, slope, xerr=xe, fmt=mk, capsize=3, zorder=3, label=name)
+    ax.set_xlabel("measured λ₁ (Benettin, per unit time)   [x-err = finite-time window scatter]")
+    ax.set_ylabel("gradient-gain slope (per unit time)")
     ax.set_title("Gradient-gain rate tracks λ₁ across regimes")
     ax.legend(fontsize=7, loc="upper left")
     fig.tight_layout()

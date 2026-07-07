@@ -122,27 +122,28 @@ What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapun
 
 Equation~\eqref{eq:loss-grad} also gives a second, independent handle on $\lambda_1$. By Eq.~\eqref{eq:lambda1}, the growth rate of the gradient gain $\norm{M_T}$ with $T$ is itself a finite-horizon estimate of $\lambda_1$---distinct from the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov}, computed from the same orbit, and expected to agree with it as $T\to\infty$ by Oseledets. Section~\ref{sec:m-consistency} makes this comparison the basis of Part~A.
 
-\subsection{The two systems}\label{sec:bg-systems}
+\subsection{The systems}\label{sec:bg-systems}
 % pendulum (integrable, lambda_1 = 0), acrobot (chaotic, lambda_1 > 0).
 % Characterised as ODE / Hamiltonian systems; separable vs non-separable Hamiltonian; discretised by
 % semi-implicit (symplectic) Euler.
 
-We study two mechanical systems that share a common structure but span the range of dynamical behaviour we care about. Each is a conservative Hamiltonian system: writing the state as a configuration $q$ with conjugate momentum $p$, the dynamics follow from a Hamiltonian
+We study three systems that span the range of dynamical behaviour we care about: one integrable and two chaotic of contrasting character. Each is a conservative Hamiltonian system: writing the state as a configuration $q$ with conjugate momentum $p$, the dynamics follow from a Hamiltonian
 \begin{equation}
 H(q,p) = \tfrac{1}{2}\,p^\top M(q)^{-1} p + V(q),
 \label{eq:hamiltonian}
 \end{equation}
 the sum of kinetic and potential energy, with $M(q)$ the configuration-dependent mass (inertia) matrix~\cite{arnold1989mathematical}. Equivalently, in second-order form the passive dynamics obey the manipulator equation $M(q)\ddot q + C(q,\dot q)\dot q + G(q) = 0$~\cite{tedrake2023underactuated}; control enters as a forcing term on the right, but our Lyapunov diagnostics concern the underlying conservative flow, for which Liouville's theorem applies and the spectrum sums to zero as in Section~\ref{sec:bg-lyapunov}.
 
-The two systems form a deliberate contrast in $\lambda_1$:
+The three systems form a deliberate contrast in $\lambda_1$:
 \begin{itemize}
 \item \textbf{Pendulum} --- a single degree of freedom with separable Hamiltonian $H=\tfrac{1}{2}p^2 + V(\theta)$. A one-degree-of-freedom autonomous Hamiltonian is integrable: energy conservation confines every orbit to a level set of $H$, leaving no room for exponential divergence, so $\lambda_1=0$~\cite{arnold1989mathematical}. This is our ordered baseline.
 \item \textbf{Acrobot} --- a two-link pendulum actuated only at the elbow, the textbook chaotic underactuated system~\cite{spong1995swing}. Its inertia matrix $M(q)$ depends on the configuration, making the Hamiltonian \emph{non-separable}, and its passive dynamics are chaotic, $\lambda_1>0$.
+\item \textbf{Hénon--Heiles} --- a unit-mass particle in the smooth two-dimensional potential $V(x,y)=\tfrac{1}{2}(x^2+y^2)+x^2y-\tfrac{1}{3}y^3$, a classical model from galactic dynamics~\cite{henon1964applicability}. Its Hamiltonian is \emph{separable} (constant mass matrix $M=I$), yet for energies approaching the escape value $E=\tfrac{1}{6}$ the motion is strongly chaotic, $\lambda_1>0$. It is a second, mechanistically independent chaotic system---of different origin and structure from the acrobot---included to show the gradient diagnostics track chaos itself, not the mechanical setting. Its phase space is \emph{mixed} (regular tori coexist with a chaotic sea), so we launch orbits in the chaotic sea; $\lambda_1$ is $O(0.1)$, small but genuinely positive.
 \end{itemize}
 
-The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B.
+The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B. Chaos does not require it, however: Hénon--Heiles is separable ($M=I$) yet chaotic, its sensitivity arising from the anharmonic potential rather than a configuration-dependent inertia.
 
-Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the acrobot---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
+Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum and Hénon--Heiles ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the chaotic acrobot and Hénon--Heiles---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
 
 \section{Methods --- what we simulate and how}\label{sec:methods}
 
@@ -338,7 +339,8 @@ Section~\ref{sec:A-regimes}.
 % slope tracks Benettin lambda_1 across an acrobot energy sweep + pendulum, corr ~0.99; Fig 5.
 Section~\ref{sec:A-law} fixed the law on two orbits; here we vary the dynamics continuously. We sweep
 the acrobot across initial energies ($\theta_1$ from $0.5$ to $3.0$, with $\lambda_1$ spanning from near
-zero to $\sim\!1.3\,\mathrm{s}^{-1}$, non-monotonically) and add the integrable pendulum, and for each we compare the
+zero to $\sim\!1.3\,\mathrm{s}^{-1}$, non-monotonically), add the integrable pendulum, and include a second, mechanistically independent
+chaotic system---Hénon--Heiles, swept across its own energies. For each we compare the
 gradient-gain slope against the Benettin $\lambda_1$ (Fig.~\ref{fig:slope-vs-lambda}). The points
 cluster on the line slope $=\lambda_1$: across the integrable-to-chaotic range the two rates correlate
 at $0.99$, with best-fit slope $0.96$ (ideal $1$) and near-zero intercept. The gradient-gain rate is
@@ -347,13 +349,16 @@ thus $\lambda_1$ not merely on a single orbit but as a function of the regime.
 \begin{figure}[t]\centering
   \includegraphics[width=0.72\linewidth]{fig5.png}
   \caption{Gradient-gain slope versus Benettin $\lambda_1$ across an acrobot energy sweep
-  ($\theta_1=0.5\!\to\!3.0$) and the pendulum; points cluster on $y=x$ (correlation $0.99$).
-  Horizontal bars are finite-time Lyapunov window scatter, not confidence intervals.}
+  ($\theta_1=0.5\!\to\!3.0$), the pendulum, and a Hénon--Heiles energy sweep (a second, independent
+  chaotic system; triangles); all cluster on $y=x$ (correlation $0.99$). Units are each system's own
+  inverse time (mechanical systems in $\mathrm{s}^{-1}$, Hénon--Heiles dimensionless), so $y=x$ is the
+  unit-free statement slope $=\lambda_1$. Horizontal bars are finite-time Lyapunov window scatter.}
   \label{fig:slope-vs-lambda}
 \end{figure}
 
-The acrobot energy sweep already spans the integrable-to-chaotic transition, so no further system is
-needed here. The horizontal error bars
+Crucially the fit is unchanged when a second, mechanistically independent chaotic system is added: the
+Hénon--Heiles orbits (a smooth galactic potential, $\lambda_1$ up to $\sim\!0.15$) fall on the same line
+slope $=\lambda_1$, so the law reflects chaos itself rather than the acrobot's particular mechanics. The horizontal error bars
 report the finite-time scatter of the Benettin estimate over independent windows---an honest depiction
 of finite-time Lyapunov uncertainty, not a confidence interval on the plotted point.
 

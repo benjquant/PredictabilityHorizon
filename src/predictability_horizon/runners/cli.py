@@ -10,6 +10,7 @@ from predictability_horizon.systems import (  # noqa: F401  (register)
     SYSTEMS,
     acrobot,
     cartpole,
+    henon_heiles,
     pendulum,
 )
 
