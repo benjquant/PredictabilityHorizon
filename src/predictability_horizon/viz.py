@@ -68,7 +68,11 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
     """
     pend_tmax, acro_tmax = (8.0, 2.0) if fast else (40.0, 8.0)
     n_p, n_a = (6, 6) if fast else (32, 20)
-    fig, (axp, axa) = plt.subplots(1, 2, figsize=(9.5, 4.2))
+    fig = plt.figure(figsize=(9.5, 8.4))
+    gs = fig.add_gridspec(2, 4)
+    axp = fig.add_subplot(gs[0, 0:2])  # top-left: pendulum (same width as before)
+    axa = fig.add_subplot(gs[0, 2:4])  # top-right: acrobot (same width as before)
+    axh = fig.add_subplot(gs[1, 1:3])  # bottom-center: Hénon-Heiles, one-panel width
 
     # --- pendulum (left): linear law (λ₁=0); inset proves linearity (log-log slope 1) ---
     resp, dtp = _grad_law_on("pendulum", np.array([2.0, 0.0]), pend_tmax, n_p)
@@ -118,13 +122,38 @@ def make_fig1_gradient_law(out: Path, fast: bool = False) -> Path:
              transform=axa.transAxes, va="top", ha="left", fontsize=8, color="0.45", linespacing=1.6)
     axa.legend(fontsize=8, loc="lower right")
 
+    # --- Hénon-Heiles (bottom, centered): exponential law, Benettin cross-check ---
+    from predictability_horizon.systems.henon_heiles import chaotic_sea_ic
+
+    hh_tmax = 40.0 if fast else 120.0
+    n_h = 6 if fast else 20
+    resh, dth = _grad_law_on("henon_heiles", chaotic_sea_ic(0.16), hh_tmax, n_h)
+    thz = resh.horizons * dth
+    axh.semilogy(thz, resh.grad_norms, "o", ms=4, color="C4", label="measured")
+    cut_h = 0.3 * hh_tmax  # fit past the initial transient
+    m_h = thz >= cut_h
+    lam_h, c_h = np.polyfit(thz[m_h], np.log(resh.grad_norms[m_h]), 1)
+    tlh = np.linspace(thz[0], thz[-1], 200)
+    exh = np.exp(lam_h * tlh + c_h)
+    axh.semilogy(tlh[tlh >= cut_h], exh[tlh >= cut_h], "-", color="mediumpurple", lw=1.6,
+                 label=r"$\|M_T\|\propto e^{\lambda_1 T}$")
+    axh.semilogy(tlh[tlh < cut_h], exh[tlh < cut_h], "--", color="mediumpurple", lw=1.0, alpha=0.45)
+    lam_qr_h = resh.lambda1_per_step / dth
+    axh.set_title("Hénon-Heiles — chaotic")
+    axh.set_xlabel(r"rollout horizon $T$ (time units)")
+    axh.set_ylabel(r"$\|M_T\|_2$")
+    axh.text(0.045, 0.96, rf"Benettin $\lambda_1={lam_qr_h:.3f}$" "\n" rf"slope $\lambda_1={lam_h:.3f}$",
+             transform=axh.transAxes, va="top", ha="left", fontsize=8, color="0.45", linespacing=1.6)
+    axh.legend(fontsize=8, loc="lower right")
+
     print(f"[fig1] pendulum: a={a:.3f}/s slope={lam_sp:.3f}/s Benettin={lam_qr_p:.3f}/s | "
-          f"acrobot: slope={lam:.3f}/s Benettin={lam_qr_a:.3f}/s (fit T>={cut:.0f}s)")
+          f"acrobot: slope={lam:.3f}/s Benettin={lam_qr_a:.3f}/s (fit T>={cut:.0f}s) | "
+          f"HH: slope={lam_h:.3f} Benettin={lam_qr_h:.3f}")
     fig.suptitle(
         r"Rollout-Jacobian gain $\|M_T\|_2$: linear (integrable) vs exponential (chaotic)",
         fontsize=11,
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
     plt.close(fig)
@@ -521,82 +550,129 @@ def make_fig5_slope_vs_lambda(out: Path, fast: bool = False) -> Path:
     return out
 
 
-def make_fig6_gradient_horizon(out: Path, fast: bool = False) -> Path:
-    """Analytic-gradient SNR collapses past the predictability horizon T ≲ 1/λ₁.
-
-    X-axis is in Lyapunov-time units: steps * dt * lambda1.  The vertical dashed line
-    at T*lambda1=1 marks the predictability horizon.
-    """
-    s = SYSTEMS["acrobot"]
-    horizons_arr: npt.NDArray[np.int_] = (
-        np.arange(200, 1200, 200) if fast else np.arange(500, 4500, 500)
-    )
-    x0 = np.array([2.5, 0.0, 0.0, 0.0])
-    # A single chaotic orbit's SNR has multiplicative finite-time fluctuations (its
-    # gradient/Hessian don't grow perfectly smoothly), so SNR(T) ~ (1/eps)·e^{-λ₁T}
-    # times a fluctuating factor. Average over several nearby BASE trajectories, with a
-    # geometric mean (the fluctuations are multiplicative), to expose the underlying
-    # decay. Averaging over perturbation seeds at a single base does NOT help — the mean
-    # gradient is fixed by that one orbit.
+def _snr_curve(
+    system: Any, x0: npt.NDArray[np.float64], horizons_arr: npt.NDArray[np.int_],
+    n_base: int, n_ic: int, base_eps: float = 0.05,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float]:
+    """Base-trajectory-averaged (geomean) analytic-gradient SNR vs horizon, and the orbit's λ₁."""
     rng_base = np.random.default_rng(0)
+    runs = []
+    for b in range(n_base):
+        xb = x0 if b == 0 else x0 + base_eps * rng_base.standard_normal(system.dim)
+        _, snr_b = gradient_snr_vs_horizon(
+            system.step_kernel, xb, system.default_params, system.suggested_dt,
+            horizons_arr, system.dim, n_ic=n_ic, seed=b,
+        )
+        runs.append(snr_b)
+    snr = np.exp(np.mean(np.log(np.maximum(np.array(runs), 1e-30)), axis=0))
+    lam_steps = 2000 if len(horizons_arr) < 6 else 20000
+    traj = rollout(cast(wp.Kernel, system.step_kernel), x0, np.zeros(lam_steps),
+                   system.default_params, system.suggested_dt, lam_steps)
+
+    def _jac(state: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        return cast(npt.NDArray[np.float64],
+                    system.jacobian(state, 0.0, system.default_params, system.suggested_dt))
+
+    lam = lyapunov_spectrum(_jac, traj[len(traj) // 10 :], dt=system.suggested_dt, k=system.dim).largest
+    return horizons_arr.astype(float), snr, lam
+
+
+def make_fig6_gradient_horizon(out: Path, fast: bool = False) -> Path:
+    """The usable-gradient horizon is 1/λ₁: analytic-gradient SNR collapses at T·λ₁≈1.
+
+    Two chaotic systems whose λ₁ differ ~10x (acrobot ~1.2/s, Hénon-Heiles ~0.13) both collapse at
+    the same Lyapunov time T·λ₁≈1 on their own λ₁ axes -- so the collapse is set by the Lyapunov
+    clock, not the rollout length. Past the horizon the gradient's *direction* is dominated by chaotic
+    amplification of the perturbation rather than by the objective: it is noise, not signal. (The
+    integrable pendulum also decorrelates eventually, but on the far slower non-isochronicity clock
+    1/(omega' eps), not the Lyapunov one -- it has no place on this T·λ₁ axis and is not shown.)
+    """
+    from predictability_horizon.systems.henon_heiles import chaotic_sea_ic
+
     n_base = 1 if fast else 4
     n_ic = 3 if fast else 30
-    base_eps = 0.05
-    snr_runs = []
-    horizons = horizons_arr.astype(float)
-    for b in range(n_base):
-        xb = x0 if b == 0 else x0 + base_eps * rng_base.standard_normal(4)
-        _, snr_b = gradient_snr_vs_horizon(
-            s.step_kernel,
-            xb,
-            s.default_params,
-            s.suggested_dt,
-            horizons_arr,
-            4,
-            n_ic=n_ic,
-            seed=b,
-        )
-        snr_runs.append(snr_b)
-    snr = np.exp(np.mean(np.log(np.maximum(np.array(snr_runs), 1e-30)), axis=0))
-    # λ₁ reference on a dedicated long trajectory (the SNR horizons are too short to
-    # converge λ₁; using horizons[-1] here would under-estimate it and mis-scale the axis).
-    lam_steps = 2000 if fast else 20000
-    traj = rollout(
-        cast(wp.Kernel, s.step_kernel),
-        x0,
-        np.zeros(lam_steps),
-        s.default_params,
-        s.suggested_dt,
-        lam_steps,
-    )
+    acro = SYSTEMS["acrobot"]
+    hh = SYSTEMS["henon_heiles"]
+    acro_h: npt.NDArray[np.int_] = np.arange(200, 1200, 200) if fast else np.arange(500, 5000, 500)
+    hh_h: npt.NDArray[np.int_] = np.arange(200, 1200, 200) if fast else np.arange(300, 2400, 300)
 
-    def _jac6(state: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        return cast(
-            npt.NDArray[np.float64],
-            s.jacobian(state, 0.0, s.default_params, s.suggested_dt),
-        )
+    ha, sa, la = _snr_curve(acro, np.array([2.5, 0.0, 0.0, 0.0]), acro_h, n_base, n_ic)
+    hh_x, sh, lh = _snr_curve(hh, chaotic_sea_ic(0.16), hh_h, n_base, n_ic)
 
-    lam = lyapunov_spectrum(
-        _jac6,
-        traj[len(traj) // 10 :],
-        dt=s.suggested_dt,
-        k=4,
-    ).largest
-    fig, ax = plt.subplots(figsize=(6.5, 4))
-    ax.semilogy(horizons * s.suggested_dt * lam, snr, "o-")
+    fig, ax = plt.subplots(figsize=(6.8, 4.4))
+    ax.semilogy(ha * acro.suggested_dt * la, sa, "o-", color="crimson", label=f"acrobot (λ₁={la:.2f}/s)")
+    ax.semilogy(hh_x * hh.suggested_dt * lh, sh, "^-", color="C4", label=f"Hénon-Heiles (λ₁={lh:.3f})")
     ax.axvline(1.0, color="r", ls="--", alpha=0.6, label="T·λ₁ = 1  (the 1/λ₁ horizon)")
-    ax.set_xlabel("Lyapunov time  T·λ₁  (= steps · dt · λ₁)")
+    ax.set_xlabel("Lyapunov time  T·λ₁  (each system's own λ₁)")
     ax.set_ylabel("analytic-gradient SNR")
-    ax.set_title("Analytic-gradient SNR degrades past the predictability horizon", fontsize=11)
+    ax.set_title("Usable-gradient horizon is 1/λ₁: both systems collapse at T·λ₁≈1", fontsize=10)
+    ax.legend(fontsize=8, loc="upper right")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    print(f"[fig6] acrobot λ₁={la:.3f} SNR={sa.tolist()} | HH λ₁={lh:.3f} SNR={sh.tolist()}")
+    return out
+
+
+def _running_lambda1(
+    system: Any, x0: npt.NDArray[np.float64], dt: float, n_steps: int, n_points: int, seed: int = 0
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Running Benettin top exponent (per unit time) at n_points checkpoints, single QR pass."""
+    traj = rollout(
+        cast(wp.Kernel, system.step_kernel), x0, np.zeros(n_steps), system.default_params, dt, n_steps
+    )
+    n = system.dim
+    Q = np.linalg.qr(np.random.default_rng(seed).standard_normal((n, 1)))[0]  # noqa: N806
+    checkpoints = np.unique(np.linspace(n_steps // n_points, n_steps, n_points).astype(int))
+    ts: list[float] = []
+    lams: list[float] = []
+    log_sum = 0.0
+    ci = 0
+    for t in range(n_steps):
+        jac_t = system.jacobian(traj[t], 0.0, system.default_params, dt)
+        Q, R = np.linalg.qr(jac_t @ Q)  # noqa: N806
+        log_sum += float(np.log(abs(R[0, 0])))
+        if ci < len(checkpoints) and (t + 1) == checkpoints[ci]:
+            ts.append((t + 1) * dt)
+            lams.append(log_sum / ((t + 1) * dt))
+            ci += 1
+    return np.array(ts), np.array(lams)
+
+
+def make_fig8_lambda_convergence(out: Path, fast: bool = False) -> Path:
+    """Running Benettin λ₁ vs integration time: chaotic systems plateau, integrable decays to 0.
+
+    The decisive magnitude-free discriminator for Hénon-Heiles's small λ₁ — its estimate plateaus at
+    a positive constant while the pendulum's decays as ln T/T, so 0.13 is a genuine exponent, not a
+    slow finite-time artifact.
+    """
+    from predictability_horizon.systems.henon_heiles import chaotic_sea_ic
+
+    n_points = 12 if fast else 40
+    rows: list[tuple[str, npt.NDArray[np.float64], int, str, str]] = [
+        ("pendulum", np.array([2.0, 0.0]), 4000 if fast else 40000, "C0", "pendulum (integrable)"),
+        ("henon_heiles", chaotic_sea_ic(0.16), 4000 if fast else 40000, "C4", "Hénon-Heiles (chaotic)"),
+        ("acrobot", np.array([2.5, 0.0, 0.0, 0.0]), 3000 if fast else 20000, "crimson", "acrobot (chaotic)"),
+    ]
+    fig, ax = plt.subplots(figsize=(7.2, 4.6))
+    finals: dict[str, float] = {}
+    for name, x0, ns, colour, label in rows:
+        s = SYSTEMS[name]
+        ts, lams = _running_lambda1(s, x0, s.suggested_dt, ns, n_points)
+        ax.plot(ts, np.clip(lams, 1e-4, None), "o-", ms=3, color=colour, label=label)  # log-y safe
+        finals[name] = float(lams[-1])
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("integration time  T  (each system's own units)")
+    ax.set_ylabel(r"running finite-time $\lambda_1$")
+    ax.set_title("Chaotic λ₁ plateaus; integrable λ₁ decays to 0", fontsize=11)
     ax.legend(fontsize=8)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    print(
-        f"FIG6: lambda1={lam:.3f}/s; SNR at T*lam=",
-        [f"{(h * s.suggested_dt * lam):.2f}:{v:.1f}" for h, v in zip(horizons, snr, strict=True)],
-    )
+    print("[fig8] final running λ₁:", {k: round(v, 4) for k, v in finals.items()})
     return out
 
 

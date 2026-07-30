@@ -30,7 +30,7 @@ def systems() -> None:
 @main.command()
 @click.option("--out", default="writeup/figures", type=click.Path())
 def reproduce(out: str) -> None:
-    """Regenerate Fig 1-7 (trains the world models, runs the Part-A sweeps + the
+    """Regenerate Fig 1-8 (trains the world models, runs the Part-A sweeps + the
     structure-preserving comparison; ~35 min on CPU)."""
     from predictability_horizon.viz import (
         make_fig1_gradient_law,
@@ -40,6 +40,7 @@ def reproduce(out: str) -> None:
         make_fig5_slope_vs_lambda,
         make_fig6_gradient_horizon,
         make_fig7_structured_spectrum,
+        make_fig8_lambda_convergence,
     )
 
     d = Path(out)
@@ -51,6 +52,7 @@ def reproduce(out: str) -> None:
         (make_fig5_slope_vs_lambda, "fig5.png"),
         (make_fig6_gradient_horizon, "fig6.png"),
         (make_fig7_structured_spectrum, "fig7.png"),
+        (make_fig8_lambda_convergence, "fig8.png"),
     ]:
         p = fn(out=d / name)
         click.echo(f"wrote {p}")

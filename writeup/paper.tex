@@ -20,6 +20,15 @@
 \usepackage{microtype}
 \usepackage{parskip}  % block paragraphs: zero indent + small vertical gap between paragraphs
 
+% --- Float placement: the tall 3-panel Fig 1 exceeds the default top-float limit and otherwise
+% cascades every figure to the end. Loosen the fractions so large [t] floats stay near their refs. ---
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{2}
+\setcounter{totalnumber}{3}
+
 % --- Bibliography ---
 \usepackage[backend=biber, style=numeric, sorting=none]{biblatex}
 \addbibresource{paper.bib}
@@ -143,7 +152,7 @@ The three systems form a deliberate contrast in $\lambda_1$:
 
 The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B. Chaos does not require it, however: Hénon--Heiles is separable ($M=I$) yet chaotic, its sensitivity arising from the anharmonic potential rather than a configuration-dependent inertia.
 
-Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the two conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum and Hénon--Heiles ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the chaotic acrobot and Hénon--Heiles---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
+Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the three conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum and Hénon--Heiles ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the chaotic acrobot and Hénon--Heiles---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
 
 \section{Methods --- what we simulate and how}\label{sec:methods}
 
@@ -179,6 +188,12 @@ The kernel advances Eq.~\eqref{eq:semi-implicit} with $\dot\omega = M(\theta)^{-
 form obtained by inverting the $2\times2$ system; we verified that this closed form reproduces
 $M(\theta)^{-1}F$ to machine precision. Because $M$ depends on $\theta$, the Hamiltonian is
 non-separable, which is the structural feature exploited in Part~B (Section~\ref{sec:partB}).
+\item \textbf{Hénon--Heiles} (state $(x,y,p_x,p_y)$): a unit-mass particle in the smooth potential
+$V(x,y)=\tfrac12(x^2+y^2)+x^2y-\tfrac13 y^3$, so the accelerations are just the force $-\nabla V$,
+namely $\ddot x = -(x+2xy)$ and $\ddot y = -(y+x^2-y^2)$. The mass matrix is the identity, so unlike
+the acrobot the Hamiltonian is \emph{separable} and the semi-implicit step is exactly symplectic
+(Section~\ref{sec:bg-systems}); the chaos here comes from the anharmonic potential, not a
+configuration-dependent inertia.
 \end{itemize}
 
 Reverse-mode differentiation requires the full trajectory to be available on the backward pass, so
@@ -196,9 +211,10 @@ System & $dt$ & Parameters \\
 \midrule
 Pendulum & $5\times10^{-3}$ & $g=9.81,\ \ell=1$ \\
 Acrobot  & $5\times10^{-4}$ & $m_1=m_2=1,\ l_1=l_2=1,\ g=9.81$ \\
+Hénon--Heiles & $10^{-2}$ & unit mass, standard coupling ($\lambda=1$) \\
 \bottomrule
 \end{tabular}
-\caption{Integration step and physical parameters of the two Warp simulators.}
+\caption{Integration step and physical parameters of the three Warp simulators.}
 \label{tab:sim-params}
 \end{table}
 
@@ -237,10 +253,11 @@ $\operatorname{tr} Df = -(\sigma+1+\beta)$ to machine precision (Eq.~\eqref{eq:s
 \end{itemize}
 
 Finally, the per-step Jacobian feeding the estimator is computed analytically for the pendulum and
-by central finite differences for the acrobot, and each is cross-checked against a third, independent
-route---Warp's reverse-mode autodiff. The analytic pendulum Jacobian agrees with autodiff to
-$1.7\times10^{-9}$ and the central-difference acrobot Jacobian to $2.0\times10^{-5}$, confirming that
-the tangent dynamics the estimator integrates are the ones the simulator actually propagates.
+Hénon--Heiles and by central finite differences for the acrobot, and each is cross-checked against a
+third, independent route---Warp's reverse-mode autodiff. The analytic pendulum Jacobian agrees with
+autodiff to $1.7\times10^{-9}$, the analytic Hénon--Heiles Jacobian to $1\times10^{-4}$, and the
+central-difference acrobot Jacobian to $2.0\times10^{-5}$, confirming that the tangent dynamics the
+estimator integrates are the ones the simulator actually propagates.
 
 \subsection{Two estimators of \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:m-consistency}
 % gradient-gain slope (from the growth of ||M_T||) vs the Benettin lambda_1: two distinct finite-T
@@ -274,15 +291,19 @@ such gradient carries the rollout-Jacobian factor $M_T$ with $\norm{M_T}\sim e^{
 Section~\ref{sec:m-consistency} set up a second, gradient-side estimate of $\lambda_1$ read off that
 growth rate.
 
-Two systems play distinct roles. The chaotic \emph{acrobot} is the workhorse and carries every
-$\lambda_1$ claim; the integrable \emph{pendulum} ($\lambda_1=0$) is the null contrast, whose gradient
-grows only linearly, never exponentially.
+Three systems play distinct roles. The chaotic \emph{acrobot} and \emph{Hénon--Heiles} are the
+workhorses and carry the $\lambda_1$ claims; the integrable \emph{pendulum} ($\lambda_1=0$) is the null
+contrast, whose gradient grows only linearly, never exponentially. Hénon--Heiles, with a modest
+$\lambda_1\approx0.13$ close in magnitude to the pendulum's finite-time floor, is the sharpest test that
+the diagnostics track chaos itself rather than merely a large exponent.
 
-Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the
-matched pendulum--acrobot pair; (ii) show it holds across the whole integrable--chaotic range, by
-sweeping the acrobot's energy so $\lambda_1$ climbs continuously from near zero; (iii) turn the
-growth law into a \emph{usefulness} limit---the gradient predictability horizon $T\lesssim 1/\lambda_1$---through
-the collapse of the analytic-gradient signal-to-noise ratio on the acrobot; and (iv) draw the
+Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the pendulum
+and both chaotic systems, and see the two chaotic estimates settle onto positive plateaus while the
+pendulum's decays to zero; (ii) show it holds across the whole integrable--chaotic range, by sweeping
+the acrobot's energy so $\lambda_1$ climbs continuously from near zero, with Hénon--Heiles falling on
+the same line; (iii) turn the growth law into a \emph{usefulness} limit---the gradient predictability
+horizon $T\lesssim 1/\lambda_1$---through the collapse of the analytic-gradient signal-to-noise ratio,
+which pins to $T\lambda_1\!\approx\!1$ for two chaotic systems whose $\lambda_1$ differ tenfold; and (iv) draw the
 consequence for trajectory optimisation through the simulator, where the horizon bounds \emph{precise}
 control on the acrobot but a forgiving swing-up sails through it.
 
@@ -293,20 +314,23 @@ The rollout-Jacobian factor $\norm{M_T}_2$ that every simulator gradient carries
 it grows once that factor degenerates is precisely the integrable--chaotic distinction
 (Fig.~\ref{fig:gradient-law}). On the chaotic acrobot the gain is \emph{exponential}: a log-linear fit
 past the initial transient gives $1.29\,\mathrm{s}^{-1}$, matching the Benettin exponent
-$\lambda_1 = 1.28\,\mathrm{s}^{-1}$ measured independently on the same orbit. On the integrable pendulum
+$\lambda_1 = 1.28\,\mathrm{s}^{-1}$ measured independently on the same orbit. Hénon--Heiles behaves
+identically at its own, smaller rate---the fit gives $0.152$ against a same-orbit Benettin
+$\lambda_1=0.158$, a straight exponential over some eight decades of $\norm{M_T}_2$. On the integrable pendulum
 the gain is \emph{linear}, $\norm{M_T}_2 \propto T$ with $\lambda_1 = 0$ exactly---the log--log inset
 shows the unit power law. The gradient gain thus blows up at the Lyapunov rate on chaotic dynamics, and
 grows only \emph{polynomially}, never exponentially, on integrable ones.
 
 \begin{figure}[t]\centering
   \includegraphics[width=\linewidth]{fig1.png}
-  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$ in seconds
-  (semilog), each panel over its own physical-time window. Integrable pendulum (left): \emph{linear}
+  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$
+  (semilog), each panel over its own time window. Top-left, integrable pendulum: \emph{linear}
   growth $\norm{M_T}_2\propto T$ with $\lambda_1=0$ (inset: log--log slope $1$); the quoted finite-time
-  $\lambda_1$ are window artifacts that decay to $0$. Chaotic acrobot (right): \emph{exponential}
+  $\lambda_1$ are window artifacts that decay to $0$. Top-right, chaotic acrobot: \emph{exponential}
   growth, log-slope $1.29\,\mathrm{s}^{-1}$ matching the same-orbit Benettin
-  $\lambda_1=1.28\,\mathrm{s}^{-1}$. Fits are taken past the initial transient (solid; dashed
-  extrapolation).}
+  $\lambda_1=1.28\,\mathrm{s}^{-1}$. Bottom, chaotic Hénon--Heiles: likewise \emph{exponential} at a
+  smaller rate, log-slope $0.152$ against Benettin $0.158$ (dimensionless units). Fits are taken past
+  the initial transient (solid; dashed extrapolation).}
   \label{fig:gradient-law}
 \end{figure}
 
@@ -323,7 +347,21 @@ for an isochronous system such as the harmonic oscillator, whose gain stays boun
 is only linear, $\lambda_1=\lim_{T\to\infty}T^{-1}\ln\norm{M_T}_2=0$ exactly; a finite-horizon slope
 returns not zero but a small positive number \emph{decaying} with the window as $\ln T/T$
 ($0.05$--$0.08\,\mathrm{s}^{-1}$ over $40\,\mathrm{s}$ here)---a finite-time artifact of fitting an
-exponential to a line, not a Lyapunov exponent.
+exponential to a line, not a Lyapunov exponent. This decay-versus-plateau is itself the cleanest chaos
+test: Figure~\ref{fig:lambda-convergence} tracks the running $\lambda_1$ against integration time, and
+it settles onto a positive constant for the two chaotic systems (acrobot $\approx1.2$, Hénon--Heiles
+$\approx0.11$) while sliding steadily toward zero for the pendulum. Hénon--Heiles's small exponent is
+thus a genuine constant, not a slow artifact like the pendulum's floor---a distinction of trend, not of
+magnitude.
+
+\begin{figure}[t]\centering
+  \includegraphics[width=0.62\linewidth]{fig8.png}
+  \caption{Running finite-time $\lambda_1$ (Benettin) versus integration time. The chaotic acrobot and
+  Hénon--Heiles settle onto positive plateaus; the integrable pendulum decays toward zero as
+  $\ln T/T$. This plateau-versus-decay separates Hénon--Heiles's small but genuine $\lambda_1$ from the
+  pendulum's finite-time floor, independently of magnitude.}
+  \label{fig:lambda-convergence}
+\end{figure}
 
 Two points fix the chaotic case. First, the rate is a \emph{single} factor of $\lambda_1$: we fit
 $\norm{M_T}_2$, which grows as $e^{\lambda_1 T}$, so its log-slope is $\lambda_1$; a squared
@@ -373,25 +411,35 @@ $\nabla_{x_0}\norm{x_T}^2$ to its spread across the ensemble (Fig.~\ref{fig:grad
 acrobot ($\lambda_1=1.23\,\mathrm{s}^{-1}$) the SNR is large well inside the horizon ($\approx\!170$ at
 $T\lambda_1\approx0.3$) and falls by roughly an order of magnitude past $T\lambda_1\approx1$ (to
 $\approx\!20$--$50$): the gradient still has a large magnitude, but its \emph{direction} is no longer
-shared across nearby initial conditions. The crossover sits at the predictability horizon
-$T\sim1/\lambda_1$, up to a logarithmic factor $\sim\log(1/\varepsilon)/(\lambda_1\,dt)$ set by the
-perturbation scale $\varepsilon$.
+shared across nearby initial conditions. The decisive point is that this crossover tracks the Lyapunov
+clock, not the rollout length. Hénon--Heiles, whose $\lambda_1$ is an order of magnitude smaller
+($0.13$), collapses at the \emph{same} place on its own Lyapunov axis---from $\approx\!190$ to below
+$1$ through $T\lambda_1\approx1$. Two systems that differ tenfold in $\lambda_1$ thus lose gradient
+usability at the same $T\lambda_1$: the usable-gradient horizon is $T\sim1/\lambda_1$, up to a
+logarithmic factor $\sim\log(1/\varepsilon)/(\lambda_1\,dt)$ set by the perturbation scale $\varepsilon$.
 
 \begin{figure}[t]\centering
   \includegraphics[width=0.75\linewidth]{fig6.png}
-  \caption{Analytic-gradient SNR versus Lyapunov time $T\lambda_1$ (acrobot). The SNR degrades past the
-  predictability horizon $T\lambda_1=1$ (dashed): the gradient's direction decorrelates across nearby
-  initial conditions even though its magnitude keeps growing.}
+  \caption{Analytic-gradient SNR versus Lyapunov time $T\lambda_1$ for two chaotic systems whose
+  $\lambda_1$ differ tenfold (acrobot $1.23\,\mathrm{s}^{-1}$, Hénon--Heiles $0.13$), each on its own
+  $\lambda_1$. Both collapse at the same $T\lambda_1\approx1$ (dashed): the gradient's direction
+  decorrelates across nearby initial conditions even as its magnitude keeps growing, so the
+  usable-gradient horizon is $1/\lambda_1$---set by the Lyapunov clock, not the rollout length.}
   \label{fig:gradient-horizon}
 \end{figure}
 
 This collapse is genuinely nonlinear, not a normalisation artifact. Each ensemble gradient has
 magnitude $\sim\norm{M_T}\sim e^{\lambda_1 T}$, so the ensemble variance grows as $e^{2\lambda_1 T}$;
-on a purely linear map this common growth cancels between the mean (signal) and the spread (noise) and
-the SNR stays flat. The observed decline therefore measures real loss of \emph{directional} agreement
-among neighbouring trajectories: past $T\sim1/\lambda_1$ the analytic gradient points a different way
-for every nearby start, which is exactly what makes long differentiable rollouts unusable for
-first-order optimisation.
+on a purely linear (isochronous) map this common growth cancels between the mean (signal) and the
+spread (noise) and the SNR stays flat. The observed decline therefore measures real loss of
+\emph{directional} agreement among neighbouring trajectories: past $T\sim1/\lambda_1$ the analytic
+gradient points a different way for every nearby start, which is exactly what makes long differentiable
+rollouts unusable for first-order optimisation. Decorrelation by itself is not unique to chaos---even an
+integrable but \emph{anharmonic} system loses coherence eventually, as neighbouring orbits at slightly
+different frequencies dephase---but that runs on the non-isochronicity clock $\sim1/(\omega'\varepsilon)$,
+which recedes without bound as the ensemble tightens. What is chaos-specific is that the collapse is
+pinned to the Lyapunov clock at $T\lambda_1\sim1$: a horizon a practitioner cannot escape by shrinking
+$\varepsilon$.
 
 \subsection{Consequence: optimisation through the simulator}\label{sec:A-consequence}
 % acrobot trajectory optimisation: precise reach hits the log-factor wall, forgiving swing-up does not; Fig 2.

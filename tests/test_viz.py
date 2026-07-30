@@ -31,6 +31,13 @@ def test_fig5_fig6_written(tmp_path: Path):
     assert p6.exists() and p6.stat().st_size > 0
 
 
+def test_fig8_written(tmp_path: Path):
+    from predictability_horizon.viz import make_fig8_lambda_convergence
+
+    p8 = make_fig8_lambda_convergence(out=tmp_path / "fig8.png", fast=True)
+    assert p8.exists() and p8.stat().st_size > 0
+
+
 def test_fig7_written(tmp_path: Path):
     from predictability_horizon.viz import make_fig7_structured_spectrum
 
