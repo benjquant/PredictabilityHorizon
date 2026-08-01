@@ -1,4 +1,5 @@
-"""Phase 2: structure-preserving world models for the acrobot (mass matrix + transforms)."""
+"""Phase 2: structure-preserving world models for the acrobot (canonical coordinates,
+mass matrix + transforms)."""
 
 from __future__ import annotations
 
@@ -142,8 +143,8 @@ class HNN(nn.Module):
         # Interprets input as canonical (q, p); symplectic Euler in (q,p) space. H_φ is
         # non-separable (q and p are jointly embedded), so this explicit step is symplectic
         # only to O(dt²): det J = 1 + O(dt²) per step (measured spectrum sum ≈0.001) — i.e.
-        # approximately, not exactly, volume-preserving. Training converts (θ,ω) data to
-        # (θ,p) before computing loss, so H_φ is fit in canonical coords.
+        # approximately, not exactly, volume-preserving. Training data is already canonical
+        # (θ,p).
         q, p = x[..., :2], x[..., 2:]
         _, pd = self.vector_field(q, p)
         p_new = p + self.dt * pd  # symplectic Euler: momentum first
@@ -161,7 +162,12 @@ def train_hnn(
     batch_size: int = 256,
     seed: int = 0,
 ) -> HNN:
-    """Train H_φ by matching the Hamiltonian vector field to finite-difference derivatives."""
+    """Train H_phi by matching the Hamiltonian vector field to finite-difference derivatives.
+
+    The dataset is already canonical (theta, p) -- the simulator emits conjugate momenta --
+    so no omega -> p conversion happens here. Applying M(theta) again would inflate the
+    momenta and fit H_phi to data the simulator never produced.
+    """
     torch.manual_seed(seed)
     np.random.seed(seed)
     params_t = torch.as_tensor(np.asarray(params), dtype=torch.float32)
@@ -170,11 +176,8 @@ def train_hnn(
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     x_t = torch.tensor(ds.x, dtype=torch.float32)
     y_t = torch.tensor(ds.y, dtype=torch.float32)
-    q0, w0 = x_t[:, :2], x_t[:, 2:]
-    q1, w1 = y_t[:, :2], y_t[:, 2:]
-    with torch.no_grad():
-        p0 = omega_to_p(q0, w0, params_t)
-        p1 = omega_to_p(q1, w1, params_t)
+    q0, p0 = x_t[:, :2], x_t[:, 2:]
+    q1, p1 = y_t[:, :2], y_t[:, 2:]
     qdot = (q1 - q0) / dt
     pdot = (p1 - p0) / dt
     n = x_t.shape[0]
@@ -196,22 +199,17 @@ def train_hnn(
 def hnn_spectrum_on_traj(
     hnn: HNN, true_traj: npt.NDArray[np.float64], dt: float, k: int = 4
 ) -> LyapunovResult:
-    """HNN Lyapunov spectrum along the canonical (θ,p) image of a true (θ,ω) trajectory.
+    """HNN Lyapunov spectrum along a true canonical trajectory.
 
-    The HNN is a canonical (q,p)=(θ,p) map, so its Jacobian must be evaluated at the
-    canonical image of the true orbit (p = M(θ)ω), not the raw (θ,ω) states. This is the
-    apples-to-apples "model Jacobian along the true orbit" convention used for the MLP
-    (model_lyapunov_on_traj), in the HNN's canonical coords: it is comparable to the true
-    (θ,ω) λ₁ because a faithful model's Jacobians approximate the true ones along the orbit,
-    and the true system's λ₁ is the same in (θ,ω) and (q,p). Returns the LyapunovResult.
+    The HNN is a canonical (q, p) = (theta, p) map and the simulator now emits exactly those
+    coordinates, so the model's Jacobian is evaluated directly on the true orbit -- no change
+    of frame. This is the same apples-to-apples "model Jacobian along the true orbit"
+    convention used for the MLP (model_lyapunov_on_traj).
     """
     hnn.eval()
-    theta = torch.tensor(true_traj[:, :2], dtype=torch.float32)
-    omega = torch.tensor(true_traj[:, 2:], dtype=torch.float32)
-    with torch.no_grad():
-        p = omega_to_p(theta, omega, cast(torch.Tensor, hnn.params)).numpy()
-    canon_traj = np.concatenate([true_traj[:, :2], p], axis=1).astype(np.float64)
-    return lyapunov_spectrum(_model_jac_fn(hnn), canon_traj, dt=dt, k=k)
+    return lyapunov_spectrum(
+        _model_jac_fn(hnn), np.asarray(true_traj, dtype=np.float64), dt=dt, k=k
+    )
 
 
 def model_spectrum_sum(
@@ -221,9 +219,9 @@ def model_spectrum_sum(
 
     Uses the model's autograd Jacobian evaluated at TRUE acrobot states (not the model's own
     rollout) — avoids model-drift artifacts, matching the Part-B audit's apples-to-apples
-    convention. This is for (θ,ω)-space models (the plain / volume-penalty MLP). The canonical
-    HNN maps (q,p)=(θ,p), so for a meaningful λ₁ use ``hnn_spectrum_on_traj``; the volume *sum*
-    still reads ≈0 here for an HNN only because its symplectic map has det J ≈ 1 (to O(dt²)) anywhere.
+    convention. All models now live in canonical (θ,p), so this is directly comparable across
+    the plain MLP, the volume-penalty MLP and the HNN. For a meaningful λ₁ (not just the
+    volume sum) on the HNN, use ``hnn_spectrum_on_traj``.
     """
     model.eval()
     true_traj = rollout(

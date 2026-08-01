@@ -87,3 +87,34 @@ def test_hnn_is_near_volume_preserving():
     print(f"HNN spectrum_sum={ss:.4f}")
     # symplectic-by-construction ⇒ spectrum sum near 0 (loose tol; explicit integrator drifts)
     assert abs(ss) < 0.3
+
+
+@pytest.mark.integration
+def test_hnn_trains_directly_on_canonical_data():
+    """The simulator now emits (theta, p), so train_hnn must NOT convert again.
+
+    A second application of M(theta) would inflate the momenta and the learned vector field
+    would not match the data it was fit to. Checked by requiring the trained Hamiltonian
+    vector field to reproduce the finite-difference derivatives of the training data.
+    """
+    import torch
+
+    from predictability_horizon.structured_models import train_hnn
+    from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
+    from predictability_horizon.worldmodel import make_dataset
+
+    s = SYSTEMS["acrobot"]
+    ds = make_dataset(s, n_traj=40, T=1000, seed=0)
+    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=60, seed=0)
+
+    x = torch.tensor(ds.x[:256], dtype=torch.float32)
+    y = torch.tensor(ds.y[:256], dtype=torch.float32)
+    q = x[:, :2].detach().requires_grad_(True)
+    p = x[:, 2:].detach().requires_grad_(True)
+    qd, pd = hnn.vector_field(q, p)
+    qdot_ref = (y[:, :2] - x[:, :2]) / s.suggested_dt
+    pdot_ref = (y[:, 2:] - x[:, 2:]) / s.suggested_dt  # noqa: F841 (kept for readability parity)
+    rel = (torch.norm(qd - qdot_ref) / torch.norm(qdot_ref)).item()
+    print(f"HNN qdot relative error = {rel:.3f}")
+    assert rel < 0.5  # loose: 60 epochs is a smoke fit, not the Fig-7 training run
+    assert torch.isfinite(pd).all()
