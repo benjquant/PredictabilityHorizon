@@ -32,12 +32,18 @@ def test_pendulum_jacobian_autodiff_matches_analytic():
     assert np.allclose(Ja, Jad, atol=1e-4)
 
 
+# Envelope measured from an actual optimize_swingup(acrobot, [2.5,0,0,0], dt=5e-3, T=810,
+# iters=200) trajectory: canonical E in [-11.91, +64.65], max|p| = 14.48. Upright (both links
+# up) is E = 29.43; hanging rest is E = -29.43. Energies below are the TRUE _canonical_energy
+# values (the old comments were computed in the velocity frame and were wrong).
 _ENVELOPE_STATES = (
-    np.array([2.5, 0.0, 0.0, 0.0]),      # the figures' IC (E ~ 5.9)
-    np.array([2.5, -0.4, 0.3, 0.1]),
-    np.array([3.0, 0.6, -0.9, 0.4]),
-    np.array([1.2, -2.0, 4.0, -3.0]),    # actuated regime (E ~ 20)
-    np.array([-0.7, 2.2, -9.0, 7.0]),    # top of the swing-up envelope (E ~ 150)
+    np.array([2.5, 0.0, 0.0, 0.0]),        # the figures' IC (E = 5.91)
+    np.array([2.5, -0.4, 0.3, 0.1]),       # E = 6.76
+    np.array([3.0, 0.6, -0.9, 0.4]),       # E = 11.53
+    np.array([1.2, -2.0, 4.0, -3.0]),      # actuated regime (E = 1.98)
+    np.array([-0.7, 2.2, -9.0, 7.0]),      # E = 17.56, |p| = 9.0
+    np.array([1.2, -2.0, 12.0, -9.0]),     # mid-high energy (E = 42.00, |p| = 12.0)
+    np.array([-0.7, 2.2, -14.85, 11.55]),  # top of the swing-up envelope (E = 63.72, |p| = 14.85)
 )
 _ENVELOPE_DT_TOL = ((5e-4, 1e-6), (5e-3, 1e-4))
 
@@ -58,10 +64,11 @@ def test_acrobot_step_matches_the_float64_reference():
 def test_acrobot_stress_probe_outside_the_envelope():
     """Diagnostic, deliberately non-asserting beyond finiteness.
 
-    E ~ 1080 is twenty times anything the experiments visit -- outside the declared operating
-    envelope. It is kept because it is what exposed the n=4 shortfall in the first place, so
-    its numbers are worth printing whenever this suite runs. It must NOT gate the build:
-    tightening it would be asserting on a regime the paper never enters.
+    E ~ 176 is 2.7x the real maximum (E = 64.65, from an actual swing-up trajectory) --
+    outside the declared operating envelope. It is kept because it is what exposed the n=4
+    shortfall in the first place, so its numbers are worth printing whenever this suite runs.
+    It must NOT gate the build: tightening it would be asserting on a regime the paper never
+    enters.
     """
     sys = SYSTEMS["acrobot"]
     x = np.array([1.5, -1.0, 22.0, -18.0])
@@ -122,8 +129,55 @@ def test_acrobot_energy_bounded_over_the_working_horizon():
 
 
 @pytest.mark.integration
-def test_acrobot_energy_has_no_secular_drift_over_120s():
-    """Criterion 4 at the long horizon. ~30 s runtime (240k steps)."""
+def test_implicit_midpoint_energy_error_is_not_secular():
+    """Criterion 4a: the SCHEME has no secular energy drift. Measured in float64.
+
+    Implicit midpoint is symplectic, so backward error analysis says it conserves a modified
+    Hamiltonian H~ = H + O(dt^2) over exponentially long times -- the energy error is a bounded
+    oscillation with no accumulating term. This asserts that directly: fit a line through E(t)
+    over 120 s and require the total systematic change to be a small fraction of the oscillation.
+
+    Run in float64 through _midpoint_np, NOT the float32 Warp kernel. At single precision a
+    240k-step rollout accumulates ~sqrt(N)*eps32 ~ 6e-5 of roundoff random walk, which swamps the
+    scheme's own oscillation and makes the fitted slope a coin flip (it fails 7 runs in 12).
+    Precision is the confound, not the scheme. Measured here across perturbed ICs: ratio
+    0.003..0.014, span 5.29e-5..5.44e-5.
+
+    This needs no secular comparator to be discriminating: a scheme with a genuinely secular
+    error drifts monotonically, so a linear fit captures essentially the whole span and the ratio
+    is ~1, two orders above the bound. The retired kernel's actual leak is pinned separately by
+    test_legacy_kernel_leaks_energy_as_documented.
+    """
+    from predictability_horizon.systems.acrobot import _canonical_energy, _midpoint_np
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    dt = 5e-4
+    T = int(120.0 / dt)  # noqa: N806
+    z = np.array([2.5, 0.0, 0.0, 0.0])
+    e = np.empty(T + 1)
+    e[0] = _canonical_energy(z, params)
+    for i in range(T):
+        z = _midpoint_np(z, 0.0, params, dt)[0]
+        e[i + 1] = _canonical_energy(z, params)
+
+    span = (e.max() - e.min()) / abs(e.mean())
+    t = np.arange(len(e), dtype=float)
+    trend = np.polyfit(t, e, 1)[0] * len(e) / abs(e.mean())
+    print(f"[criterion 4a] float64 span={span:.3e}  |trend|/span={abs(trend) / span:.4f}")
+    assert span < 2e-4  # measured 5.4e-5
+    assert abs(trend) < 0.1 * span  # measured ratio 0.003..0.014; a secular scheme gives ~1
+
+
+@pytest.mark.integration
+def test_acrobot_energy_magnitude_bounded_over_120s():
+    """Criterion 4b: the SHIPPED float32 kernel does not bleed energy at any plotted horizon.
+
+    A magnitude claim about the simulator that actually produced the figures, as distinct from
+    criterion 4a's claim about the scheme. Bounds are sized from the spread across perturbed
+    initial conditions (span 1.38e-3..6.81e-3 over 12 ICs), not from a single run, so a float32
+    reordering between devices or Warp releases cannot flip them. The retired kernel gives 5.26
+    here -- three orders above the bound.
+    """
     sys = SYSTEMS["acrobot"]
     dt = sys.suggested_dt
     T = int(120.0 / dt)  # noqa: N806
@@ -131,11 +185,10 @@ def test_acrobot_energy_has_no_secular_drift_over_120s():
                      np.zeros(T), sys.default_params, dt, T)
     e = np.array([sys.energy(s, sys.default_params) for s in states])
     span = (e.max() - e.min()) / abs(e.mean())
-    assert span < 5e-3  # measured ~1.9e-3
-
-    t = np.arange(len(e), dtype=float)
-    trend = np.polyfit(t, e, 1)[0] * len(e) / abs(e.mean())  # total systematic change
-    assert abs(trend) < 0.5 * span  # bounded oscillation dominates the trend, not vice versa
+    drift = abs(e[-1] - e[0]) / abs(e[0])
+    print(f"[criterion 4b] float32 span={span:.3e}  end drift={drift:.3e}")
+    assert span < 2e-2  # measured 1.38e-3..6.81e-3 across ICs; legacy kernel gives 5.26
+    assert drift < 1e-2  # measured ~3e-4; legacy kernel loses 1.36 (136%) over this window
 
 
 @pytest.mark.integration

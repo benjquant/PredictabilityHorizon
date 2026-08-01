@@ -7,8 +7,10 @@ pendulum or Hénon-Heiles, semi-implicit Euler is not an option here -- the step
 implicit midpoint, solved by a FIXED count of _N_FP_ITER Picard passes so the map stays
 straight-line (no state-dependent branching) and differentiable end to end under Warp's
 reverse-mode AD. The one-step Jacobian has a closed form, a Cayley transform of J4 @ Hess H
-evaluated at the converged midpoint, which is symplectic (det J = 1) to machine precision by
-construction rather than to O(dt^2) truncation. The retired (theta, omega) explicit scheme
+evaluated at the converged (6-pass Picard) midpoint, which is symplectic (det J = 1) by
+construction rather than to O(dt^2) truncation -- verified against autodiff at FLOAT32 machine
+precision across the operating envelope (measured |det J - 1| in 3e-11..1.5e-7), not float64
+exactness. The retired (theta, omega) explicit scheme
 survives as `legacy_acrobot_step`, unregistered, solely to keep its ~21%/10s energy leak
 reproducible."""
 
@@ -71,7 +73,11 @@ def _d2potential(q: npt.NDArray[np.float64], params: npt.NDArray[np.float64]) ->
 
 
 def _canonical_energy(state: npt.NDArray[np.float64], params: npt.NDArray[np.float64]) -> float:
-    """H(theta, p) = 1/2 p^T M(theta)^-1 p + V(theta)."""
+    """H(theta, p) = 1/2 p^T M(theta)^-1 p + V(theta).
+
+    Caveat for callers normalising drift by abs(e.mean()): that is only safe while E does not
+    straddle zero -- the retired kernel's 120 s mean is 1.44 against +/-5 excursions.
+    """
     pars = np.asarray(params, dtype=np.float64)
     q = np.asarray(state[:2], dtype=np.float64)
     p = np.asarray(state[2:], dtype=np.float64)
