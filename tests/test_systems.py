@@ -177,3 +177,108 @@ def test_slope_vs_lambda_on_henon_heiles():
     assert name == "HH E=0.16"
     assert lam > 0.05 and slope > 0.05  # chaotic: both clearly positive
     assert abs(slope - lam) / lam < 0.4  # gradient-gain slope tracks lambda_1 (measured ratio ~0.92)
+
+
+def _rand_canonical_states(n=6, pmax=6.0, seed=0):
+    """Random canonical (theta1, theta2, p1, p2) states spanning the operating envelope."""
+    rng = np.random.default_rng(seed)
+    return [
+        np.array([rng.uniform(-3.2, 3.2), rng.uniform(-3.2, 3.2),
+                  pmax * rng.normal(), pmax * rng.normal()])
+        for _ in range(n)
+    ]
+
+
+def test_canonical_hamiltonian_matches_legacy_energy():
+    """H(theta, p) must be the same physical energy the legacy (theta, omega) formula gave."""
+    from predictability_horizon.systems.acrobot import (
+        _canonical_energy,
+        _legacy_energy,
+        to_canonical,
+    )
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    rng = np.random.default_rng(1)
+    for _ in range(8):
+        s = np.array([rng.uniform(-3, 3), rng.uniform(-3, 3), rng.normal(), rng.normal()])
+        assert np.isclose(_canonical_energy(to_canonical(s, params), params),
+                          _legacy_energy(s, params), rtol=1e-12)
+
+
+def test_grad_hamiltonian_is_the_gradient_of_the_hamiltonian():
+    """grad H must be the actual gradient of H -- checked against central differences."""
+    from predictability_horizon.systems.acrobot import _canonical_energy, _grad_hamiltonian
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    eps = 1e-6
+    for z in _rand_canonical_states(seed=2):
+        fd = np.zeros(4)
+        for j in range(4):
+            e = np.zeros(4)
+            e[j] = eps
+            fd[j] = (_canonical_energy(z + e, params) - _canonical_energy(z - e, params)) / (2 * eps)
+        assert np.allclose(_grad_hamiltonian(z, params), fd, rtol=1e-5, atol=1e-7)
+
+
+def test_hess_hamiltonian_is_the_derivative_of_the_gradient():
+    from predictability_horizon.systems.acrobot import _grad_hamiltonian, _hess_hamiltonian
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    eps = 1e-6
+    for z in _rand_canonical_states(seed=3):
+        fd = np.zeros((4, 4))
+        for j in range(4):
+            e = np.zeros(4)
+            e[j] = eps
+            fd[:, j] = (_grad_hamiltonian(z + e, params) - _grad_hamiltonian(z - e, params)) / (2 * eps)
+        H = _hess_hamiltonian(z, params)  # noqa: N806
+        assert np.allclose(H, H.T, atol=1e-12)  # Hessians are symmetric
+        assert np.allclose(H, fd, rtol=1e-4, atol=1e-6)
+
+
+def test_cayley_jacobian_matches_finite_difference_of_the_numpy_step():
+    """The closed-form Jacobian must be the Jacobian of the map _midpoint_np actually computes."""
+    from predictability_horizon.systems.acrobot import _cayley_jacobian, _midpoint_np
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    eps = 1e-6  # balances truncation against float64 roundoff (~1e-16 * |z| / eps)
+    for dt in (5e-4, 5e-3):
+        for z in _rand_canonical_states(pmax=3.0, seed=4):
+            fd = np.zeros((4, 4))
+            for j in range(4):
+                e = np.zeros(4)
+                e[j] = eps
+                fd[:, j] = (_midpoint_np(z + e, 0.0, params, dt)[0]
+                            - _midpoint_np(z - e, 0.0, params, dt)[0]) / (2 * eps)
+            assert np.allclose(_cayley_jacobian(z, 0.0, params, dt), fd, rtol=1e-5, atol=1e-8)
+
+
+def test_cayley_jacobian_is_exactly_symplectic_in_float64():
+    """det J = 1 identically -- the structural claim, in double precision, free of float32 noise."""
+    from predictability_horizon.systems.acrobot import _cayley_jacobian
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    for dt in (5e-4, 5e-3, 2e-2):
+        for z in _rand_canonical_states(seed=5):
+            J = _cayley_jacobian(z, 0.0, params, dt)  # noqa: N806
+            assert abs(np.linalg.det(J) - 1.0) < 1e-12
+
+
+def test_fixed_point_saturates_at_six_passes():
+    """Criterion 1: two extra Picard passes change the one-step map by less than float32 rounding.
+
+    Per-step, NOT per-trajectory: the acrobot is chaotic, so a single-ulp difference at step 1
+    is amplified to O(1) within a few Lyapunov times regardless of solver convergence. A
+    trajectory comparison would measure chaos, not convergence.
+    """
+    from predictability_horizon.systems.acrobot import _canonical_energy, _midpoint_np
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    eps32 = np.finfo(np.float32).eps
+    for dt in (5e-4, 5e-3):
+        for z in _rand_canonical_states(n=12, pmax=12.0, seed=6):
+            if _canonical_energy(z, params) > 150.0:
+                continue  # outside the declared operating envelope
+            z6 = _midpoint_np(z, 0.0, params, dt, n_iter=6)[0]
+            z8 = _midpoint_np(z, 0.0, params, dt, n_iter=8)[0]
+            assert np.linalg.norm(z8 - z6) < eps32 * max(np.linalg.norm(z), 1.0)
