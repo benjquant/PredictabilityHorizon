@@ -96,6 +96,12 @@ def test_hnn_trains_directly_on_canonical_data():
     A second application of M(theta) would inflate the momenta and the learned vector field
     would not match the data it was fit to. Checked by requiring the trained Hamiltonian
     vector field to reproduce the finite-difference derivatives of the training data.
+
+    The momentum-rate channel (pdot) is the discriminating one: a reintroduced double
+    application of M(theta) lands on the momenta, not the angles, so it is the pdot relative
+    error that catches it — measured at 1.078 before the fix vs. 0.006 after, against a
+    qdot channel that only moves 0.325 -> 0.016 and would not, by itself, cross the < 0.5
+    threshold either way.
     """
     import torch
 
@@ -113,8 +119,10 @@ def test_hnn_trains_directly_on_canonical_data():
     p = x[:, 2:].detach().requires_grad_(True)
     qd, pd = hnn.vector_field(q, p)
     qdot_ref = (y[:, :2] - x[:, :2]) / s.suggested_dt
-    pdot_ref = (y[:, 2:] - x[:, 2:]) / s.suggested_dt  # noqa: F841 (kept for readability parity)
+    pdot_ref = (y[:, 2:] - x[:, 2:]) / s.suggested_dt
     rel = (torch.norm(qd - qdot_ref) / torch.norm(qdot_ref)).item()
     print(f"HNN qdot relative error = {rel:.3f}")
     assert rel < 0.5  # loose: 60 epochs is a smoke fit, not the Fig-7 training run
-    assert torch.isfinite(pd).all()
+    rel_pdot = (torch.norm(pd - pdot_ref) / torch.norm(pdot_ref)).item()
+    print(f"HNN pdot relative error = {rel_pdot:.3f}")
+    assert rel_pdot < 0.5  # discriminates the double-M(theta) bug (1.078 before, 0.006 after)

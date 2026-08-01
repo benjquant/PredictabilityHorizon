@@ -100,11 +100,13 @@ def _model_jac_fn(
 
 
 class HNN(nn.Module):
-    """Hamiltonian NN as a (θ,ω) one-step map via canonical (θ,p) + symplectic Euler.
+    """Hamiltonian NN as a canonical (θ,p) one-step map via symplectic Euler.
 
-    Learns H_φ(q,p) on canonical coords q=θ, p=M(θ)ω; the vector field q̇=∂H/∂p,
-    ṗ=-∂H/∂q is Hamiltonian, and one symplectic-Euler step gives a (θ,ω)->(θ',ω') map.
-    Angles enter H through a (cosθ,sinθ) embedding to respect the S¹ topology.
+    Learns H_φ(q,p) directly on the canonical coords the simulator emits (q=θ, p already
+    the canonical momentum — no ω->p conversion happens here or anywhere upstream); the
+    vector field q̇=∂H/∂p, ṗ=-∂H/∂q is Hamiltonian, and one symplectic-Euler step gives a
+    (θ,p)->(θ',p') map. Angles enter H through a (cosθ,sinθ) embedding to respect the S¹
+    topology.
     """
 
     def __init__(self, params: torch.Tensor, dt: float, hidden: int = 128) -> None:
