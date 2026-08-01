@@ -232,6 +232,9 @@ def test_hess_hamiltonian_is_the_derivative_of_the_gradient():
             e[j] = eps
             fd[:, j] = (_grad_hamiltonian(z + e, params) - _grad_hamiltonian(z - e, params)) / (2 * eps)
         H = _hess_hamiltonian(z, params)  # noqa: N806
+        # Construction-guaranteed today (same `col` array written into both cross-blocks),
+        # not evidence -- this is a regression guard against a future refactor that
+        # assembles the Hessian asymmetrically.
         assert np.allclose(H, H.T, atol=1e-12)  # Hessians are symmetric
         assert np.allclose(H, fd, rtol=1e-4, atol=1e-6)
 
@@ -253,8 +256,16 @@ def test_cayley_jacobian_matches_finite_difference_of_the_numpy_step():
             assert np.allclose(_cayley_jacobian(z, 0.0, params, dt), fd, rtol=1e-5, atol=1e-8)
 
 
-def test_cayley_jacobian_is_exactly_symplectic_in_float64():
-    """det J = 1 identically -- the structural claim, in double precision, free of float32 noise."""
+def test_cayley_transform_is_algebraically_symplectic():
+    """Certifies the Cayley arithmetic and that the Hessian is assembled symmetric.
+
+    det J = 1 holds identically for J = (I - aA)^-1 (I + aA) whenever A = J4 @ S is
+    Hamiltonian with S symmetric -- regardless of whether S is the *correct* physics
+    Hessian. This test therefore CANNOT certify that the Hessian encodes the right
+    physics, and it must not be cited as the paper's symplecticity evidence. That
+    evidence comes from `test_acrobot_is_symplectic_under_autodiff` (added later),
+    which differentiates the code that actually ran.
+    """
     from predictability_horizon.systems.acrobot import _cayley_jacobian
 
     params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
