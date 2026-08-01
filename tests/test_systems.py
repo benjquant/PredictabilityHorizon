@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from predictability_horizon.experiments import slope_vs_lambda_points
 from predictability_horizon.lyapunov import lyapunov_spectrum
@@ -31,21 +32,125 @@ def test_pendulum_jacobian_autodiff_matches_analytic():
     assert np.allclose(Ja, Jad, atol=1e-4)
 
 
-def test_acrobot_energy_bounded_short_horizon():
+_ENVELOPE_STATES = (
+    np.array([2.5, 0.0, 0.0, 0.0]),      # the figures' IC (E ~ 5.9)
+    np.array([2.5, -0.4, 0.3, 0.1]),
+    np.array([3.0, 0.6, -0.9, 0.4]),
+    np.array([1.2, -2.0, 4.0, -3.0]),    # actuated regime (E ~ 20)
+    np.array([-0.7, 2.2, -9.0, 7.0]),    # top of the swing-up envelope (E ~ 150)
+)
+_ENVELOPE_DT_TOL = ((5e-4, 1e-6), (5e-3, 1e-4))
+
+
+def test_acrobot_step_matches_the_float64_reference():
+    """The Warp kernel must compute the same map as _midpoint_np, to float32 resolution."""
+    from predictability_horizon.systems.acrobot import _midpoint_np
+
     sys = SYSTEMS["acrobot"]
-    x0 = np.array([2.5, 0.0, 0.0, 0.0])  # high potential energy -> chaotic swing
-    T = 2000  # noqa: N806
-    states = rollout(sys.step_kernel, x0, np.zeros(T), sys.default_params, sys.suggested_dt, T)
+    for dt in (5e-4, 5e-3):
+        for x in _ENVELOPE_STATES:
+            got = rollout(sys.step_kernel, x, np.zeros(1), sys.default_params, dt, 1)[1]
+            want = _midpoint_np(x, 0.0, sys.default_params, dt)[0]
+            # float32 kernel vs float64 reference: resolution is ~1e-7 * |z|, and |p| reaches 9
+            assert np.allclose(got, want, rtol=1e-4, atol=1e-5)
+
+
+def test_acrobot_stress_probe_outside_the_envelope():
+    """Diagnostic, deliberately non-asserting beyond finiteness.
+
+    E ~ 1080 is twenty times anything the experiments visit -- outside the declared operating
+    envelope. It is kept because it is what exposed the n=4 shortfall in the first place, so
+    its numbers are worth printing whenever this suite runs. It must NOT gate the build:
+    tightening it would be asserting on a regime the paper never enters.
+    """
+    sys = SYSTEMS["acrobot"]
+    x = np.array([1.5, -1.0, 22.0, -18.0])
+    for dt in (5e-4, 5e-3):
+        Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, dt)  # noqa: N806
+        Ja = sys.jacobian(x, 0.0, sys.default_params, dt)  # noqa: N806
+        print(f"[stress E={sys.energy(x, sys.default_params):.0f} dt={dt:g}] "
+              f"|det J_ad - 1|={abs(np.linalg.det(Jad) - 1):.2e}  "
+              f"|J_ad - J_cayley|={np.abs(Jad - Ja).max():.2e}")
+        assert np.all(np.isfinite(Jad)) and np.all(np.isfinite(Ja))
+
+
+def test_acrobot_analytic_jacobian_matches_autodiff():
+    """Criterion 2: the closed-form Jacobian is the Jacobian of the map that actually ran.
+
+    Autodiff differentiates the executed kernel; the Cayley formula describes the map we
+    intended. An under-converged fixed point separates them and nothing else detects it.
+    """
+    sys = SYSTEMS["acrobot"]
+    for dt, tol in _ENVELOPE_DT_TOL:
+        for x in _ENVELOPE_STATES:
+            Ja = sys.jacobian(x, 0.0, sys.default_params, dt)  # noqa: N806
+            Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, dt)  # noqa: N806
+            assert np.abs(Ja - Jad).max() < tol
+
+
+def test_acrobot_is_symplectic_under_autodiff():
+    """Criterion 3: det J = 1 from the AUTODIFF Jacobian.
+
+    THIS is the paper's symplecticity evidence, because autodiff differentiates the code that
+    actually ran. test_cayley_transform_is_algebraically_symplectic asserts det J = 1 too, but
+    that holds identically for any Hamiltonian A = J4 @ S with symmetric S, so it certifies the
+    Cayley arithmetic rather than the physics and must never be cited in its place.
+    """
+    sys = SYSTEMS["acrobot"]
+    for dt, tol in _ENVELOPE_DT_TOL:
+        for x in _ENVELOPE_STATES:
+            Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, dt)  # noqa: N806
+            assert abs(np.linalg.det(Jad) - 1.0) < tol
+
+
+def test_acrobot_energy_bounded_over_the_working_horizon():
+    """Criterion 4: bounded, not merely small.
+
+    The retired kernel passed a 1 s tolerance test while losing 20% at the 10 s horizon the
+    figures actually use. A magnitude bound alone would not have caught it, so this also
+    fits a linear trend and requires the systematic component to be smaller than the
+    oscillation -- the definition of bounded rather than secular.
+    """
+    sys = SYSTEMS["acrobot"]
+    x0 = np.array([2.5, 0.0, 0.0, 0.0])
+    dt = sys.suggested_dt
+    T = int(10.0 / dt)  # noqa: N806
+    states = rollout(sys.step_kernel, x0, np.zeros(T), sys.default_params, dt, T)
     e = np.array([sys.energy(s, sys.default_params) for s in states])
-    assert (e.max() - e.min()) / abs(e.mean()) < 0.05  # bounded drift over short horizon
+    span10 = (e.max() - e.min()) / abs(e.mean())
+    assert span10 < 1e-3  # measured ~2.1e-4
 
 
-def test_acrobot_jacobian_autodiff_matches_analytic():
+@pytest.mark.integration
+def test_acrobot_energy_has_no_secular_drift_over_120s():
+    """Criterion 4 at the long horizon. ~30 s runtime (240k steps)."""
     sys = SYSTEMS["acrobot"]
-    x = np.array([2.5, -0.4, 0.3, 0.1])
-    Ja = sys.jacobian(x, 0.0, sys.default_params, sys.suggested_dt)  # noqa: N806
-    Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, sys.suggested_dt)  # noqa: N806
-    assert np.allclose(Ja, Jad, atol=1e-3)
+    dt = sys.suggested_dt
+    T = int(120.0 / dt)  # noqa: N806
+    states = rollout(sys.step_kernel, np.array([2.5, 0.0, 0.0, 0.0]),
+                     np.zeros(T), sys.default_params, dt, T)
+    e = np.array([sys.energy(s, sys.default_params) for s in states])
+    span = (e.max() - e.min()) / abs(e.mean())
+    assert span < 5e-3  # measured ~1.9e-3
+
+    t = np.arange(len(e), dtype=float)
+    trend = np.polyfit(t, e, 1)[0] * len(e) / abs(e.mean())  # total systematic change
+    assert abs(trend) < 0.5 * span  # bounded oscillation dominates the trend, not vice versa
+
+
+@pytest.mark.integration
+def test_legacy_kernel_leaks_energy_as_documented():
+    """Pins the retired defect so the roadmap's drift table stays reproducible from the repo."""
+    from predictability_horizon.systems.acrobot import _legacy_energy, legacy_acrobot_step
+
+    params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
+    dt = 5e-4
+    T = int(10.0 / dt)  # noqa: N806
+    states = rollout(legacy_acrobot_step, np.array([2.5, 0.0, 0.0, 0.0]),
+                     np.zeros(T), params, dt, T)
+    e = np.array([_legacy_energy(s, params) for s in states])
+    drift = (e[-1] - e[0]) / abs(e[0])
+    assert drift < -0.15  # roadmap table: -20.8% at 10 s
 
 
 def test_acrobot_is_chaotic():

@@ -1,4 +1,16 @@
-"""S2: acrobot / double pendulum (chaotic, lambda_1 > 0)."""
+"""S2: acrobot / double pendulum (chaotic, lambda_1 > 0).
+
+Canonical state (theta1, theta2, p1, p2): angles and their CONJUGATE MOMENTA p = M(theta)
+omega, not angular velocities. The Hamiltonian H = 1/2 p^T M(theta)^-1 p + V(theta) is
+non-separable (the kinetic term mixes theta and p through M(theta)^-1), so unlike the
+pendulum or Hénon-Heiles, semi-implicit Euler is not an option here -- the step kernel is
+implicit midpoint, solved by a FIXED count of _N_FP_ITER Picard passes so the map stays
+straight-line (no state-dependent branching) and differentiable end to end under Warp's
+reverse-mode AD. The one-step Jacobian has a closed form, a Cayley transform of J4 @ Hess H
+evaluated at the converged midpoint, which is symplectic (det J = 1) to machine precision by
+construction rather than to O(dt^2) truncation. The retired (theta, omega) explicit scheme
+survives as `legacy_acrobot_step`, unregistered, solely to keep its ~21%/10s energy leak
+reproducible."""
 
 from __future__ import annotations
 
@@ -7,7 +19,6 @@ import numpy.typing as npt
 import warp as wp
 
 from predictability_horizon.systems import System, register
-from predictability_horizon.warpsim import rollout
 
 _N_FP_ITER = 6
 """Picard passes per implicit-midpoint step.
@@ -170,7 +181,7 @@ def to_legacy(z: npt.NDArray[np.float64], params: npt.NDArray[np.float64]) -> np
 
 
 @wp.func
-def _accels(
+def _legacy_accels(
     th1: float,
     th2: float,
     w1: float,
@@ -200,13 +211,22 @@ def _accels(
 
 
 @wp.kernel
-def acrobot_step(
+def legacy_acrobot_step(
     states: wp.array2d(dtype=wp.float32),  # type: ignore[valid-type]
     actions: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
     params: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
     dt: float,
     t: int,
 ) -> None:
+    """RETIRED. The pre-2026-08 scheme, in (theta, omega). NOT REGISTERED -- do not use.
+
+    Looked like symplectic Euler and was not one: the state held angular velocities rather
+    than conjugate momenta, and the momentum kick used the OLD velocities (the Coriolis
+    terms force this). The result was a fully explicit first-order scheme losing ~21% of the
+    system's energy over 10 s. Kept solely so that leak stays reproducible -- see
+    test_legacy_kernel_leaks_energy_as_documented. `actions[t]` here is a fictitious
+    acceleration on omega_2, not a torque.
+    """
     th1 = states[t, 0]
     th2 = states[t, 1]
     w1 = states[t, 2]
@@ -216,7 +236,7 @@ def acrobot_step(
     l1 = params[2]
     l2 = params[3]
     g = params[4]
-    a1, a2 = _accels(th1, th2, w1, w2, m1, m2, l1, l2, g)
+    a1, a2 = _legacy_accels(th1, th2, w1, w2, m1, m2, l1, l2, g)
     w1n = w1 + dt * a1
     w2n = w2 + dt * (a2 + actions[t])  # optional torque on joint 2
     states[t + 1, 0] = th1 + dt * w1n
@@ -225,27 +245,72 @@ def acrobot_step(
     states[t + 1, 3] = w2n
 
 
-def _jacobian(
-    state: npt.NDArray[np.float64],
-    u: float,
-    params: npt.NDArray[np.float64],
-    dt: float,
-) -> npt.NDArray[np.float64]:
-    """Central finite-difference Jacobian of one acrobot step.
+@wp.func
+def _symp_grad(
+    q1: float, q2: float, p1: float, p2: float,
+    m1: float, m2: float, l1: float, l2: float, g: float,
+) -> tuple[float, float, float, float]:
+    """J grad H = (dH/dp, -dH/dq) in canonical (theta, p).
 
-    Uses eps=5e-3 so that the angular-velocity → position coupling (dt * eps)
-    stays above float32 resolution (~3e-7 at values ~2.5).
+    The 2x2 inverse of M is hand-expanded in scalars rather than using wp.mat22 / wp.inverse:
+    it keeps the kernel AD-transparent and avoids relying on Warp's adjoints for matrix
+    intrinsics. det M = 2 - cos^2 d in [1, 2] at the paper's parameters, so it is
+    well-conditioned everywhere.
     """
-    eps = 5e-3
-    n = 4
-    J = np.zeros((n, n))  # noqa: N806
-    for j in range(n):
-        e = np.zeros(n)
-        e[j] = eps
-        sp = rollout(acrobot_step, state + e, np.array([u]), params, dt, 1)[1]
-        sm = rollout(acrobot_step, state - e, np.array([u]), params, dt, 1)[1]
-        J[:, j] = (sp - sm) / (2.0 * eps)
-    return J
+    c = wp.cos(q1 - q2)
+    s = wp.sin(q1 - q2)
+    a = (m1 + m2) * l1 * l1
+    b = m2 * l1 * l2 * c
+    d = m2 * l2 * l2
+    det = a * d - b * b
+    u1 = (d * p1 - b * p2) / det  # u = M^-1 p  (= omega)
+    u2 = (a * p2 - b * p1) / det
+    k = m2 * l1 * l2 * s
+    dhdq1 = k * u1 * u2 + (m1 + m2) * g * l1 * wp.sin(q1)
+    dhdq2 = -k * u1 * u2 + m2 * g * l2 * wp.sin(q2)
+    return u1, u2, -dhdq1, -dhdq2
+
+
+@wp.kernel
+def acrobot_step(
+    states: wp.array2d(dtype=wp.float32),  # type: ignore[valid-type]
+    actions: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+    params: wp.array(dtype=wp.float32),  # type: ignore[valid-type]
+    dt: float,
+    t: int,
+) -> None:
+    """Implicit midpoint in canonical (theta, p), _N_FP_ITER unrolled Picard passes.
+
+    `actions[t]` is a GENERALIZED FORCE on p_2 -- a genuine elbow torque. It differs from the
+    retired kernel's action, which added to omega_2 alone and omitted the coupling
+    (M^-1)_12 tau to the shoulder link entirely; no rescaling reproduces it.
+    """
+    q1 = states[t, 0]
+    q2 = states[t, 1]
+    p1 = states[t, 2]
+    p2 = states[t, 3]
+    m1 = params[0]
+    m2 = params[1]
+    l1 = params[2]
+    l2 = params[3]
+    g = params[4]
+    tau = actions[t]
+
+    b1 = q1
+    b2 = q2
+    b3 = p1
+    b4 = p2
+    for _ in range(_N_FP_ITER):
+        f1, f2, f3, f4 = _symp_grad(b1, b2, b3, b4, m1, m2, l1, l2, g)
+        b1 = q1 + 0.5 * dt * f1
+        b2 = q2 + 0.5 * dt * f2
+        b3 = p1 + 0.5 * dt * f3
+        b4 = p2 + 0.5 * dt * (f4 + tau)
+
+    states[t + 1, 0] = 2.0 * b1 - q1
+    states[t + 1, 1] = 2.0 * b2 - q2
+    states[t + 1, 2] = 2.0 * b3 - p1
+    states[t + 1, 3] = 2.0 * b4 - p2
 
 
 def _legacy_energy(state: npt.NDArray[np.float64], params: npt.NDArray[np.float64]) -> float:
@@ -269,8 +334,8 @@ ACROBOT = register(
         dim=4,
         default_params=np.array([1.0, 1.0, 1.0, 1.0, 9.81]),
         step_kernel=acrobot_step,
-        jacobian=_jacobian,
-        energy=_legacy_energy,
+        jacobian=_cayley_jacobian,
+        energy=_canonical_energy,
         suggested_dt=0.0005,
     )
 )
