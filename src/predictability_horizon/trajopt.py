@@ -30,8 +30,17 @@ def _steps(tl: float, lam1: float, dt: float) -> int:
 def measure_lambda1(
     system: System, x0: Vec, dt: float, t_phys: float = 8.0, transient_phys: float = 1.0
 ) -> float:
-    """Benettin/QR largest Lyapunov exponent (per unit time) on the passive trajectory from ``x0``."""
-    n = min(8000, round(t_phys / dt))
+    """Benettin/QR largest Lyapunov exponent (per unit time) on the passive trajectory from ``x0``.
+
+    Rolls out ``t_phys`` seconds (default 8 s = ``round(t_phys / dt)`` steps), discards the
+    first ``transient_phys`` seconds (default 1 s) so the Benettin QR renormalisation has
+    settled onto the leading Oseledets direction, then averages the log-growth over the
+    remaining ~7 s. ``t_phys`` is honoured exactly -- there is no internal step cap. This is
+    not free: at the production ``dt=5e-4`` this is 16000 Jacobian evaluations (vs. 1600 at the
+    coarse test ``dt=5e-3``). A previous ``min(8000, ...)`` cap silently halved the window at
+    dt=5e-4 (8 s -> 4 s) and understated lambda_1 by 11% (0.8953 vs. the honoured 1.0066 /s).
+    """
+    n = round(t_phys / dt)
     traj = rollout(system.step_kernel, x0, np.zeros(n), system.default_params, dt, n)  # type: ignore[arg-type]
     jac = lambda s: system.jacobian(s, 0.0, system.default_params, dt)  # noqa: E731
     tr = round(transient_phys / dt)

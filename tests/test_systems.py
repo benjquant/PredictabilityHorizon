@@ -57,7 +57,7 @@ def test_acrobot_step_matches_the_float64_reference():
         for x in _ENVELOPE_STATES:
             got = rollout(sys.step_kernel, x, np.zeros(1), sys.default_params, dt, 1)[1]
             want = _midpoint_np(x, 0.0, sys.default_params, dt)[0]
-            # float32 kernel vs float64 reference: resolution is ~1e-7 * |z|, and |p| reaches 9
+            # float32 kernel vs float64 reference: resolution is ~1e-7 * |z|, and |p| reaches 14.85
             assert np.allclose(got, want, rtol=1e-4, atol=1e-5)
 
 
@@ -111,12 +111,16 @@ def test_acrobot_is_symplectic_under_autodiff():
 
 
 def test_acrobot_energy_bounded_over_the_working_horizon():
-    """Criterion 4: bounded, not merely small.
+    """Criterion 4: energy stays within a tight span over the 10 s horizon the figures use.
 
-    The retired kernel passed a 1 s tolerance test while losing 20% at the 10 s horizon the
-    figures actually use. A magnitude bound alone would not have caught it, so this also
-    fits a linear trend and requires the systematic component to be smaller than the
-    oscillation -- the definition of bounded rather than secular.
+    The retired kernel passed a 1 s tolerance test while losing 20% by 10 s, so this checks
+    the full 10 s span rather than a short window. It asserts ONLY the magnitude bound below
+    -- it does NOT fit a trend and does not, by itself, distinguish bounded oscillation from
+    slow secular drift. That distinction is `test_implicit_midpoint_energy_error_is_not_secular`
+    (float64, `_midpoint_np`, `@pytest.mark.integration`), which fits a linear trend over 120 s
+    and requires the systematic component to be a small fraction of the oscillation. This test
+    alone, run in the default (non-integration) suite, does not gate secularity for the shipped
+    float32 kernel at any horizon.
     """
     sys = SYSTEMS["acrobot"]
     x0 = np.array([2.5, 0.0, 0.0, 0.0])
@@ -145,7 +149,8 @@ def test_implicit_midpoint_energy_error_is_not_secular():
 
     This needs no secular comparator to be discriminating: a scheme with a genuinely secular
     error drifts monotonically, so a linear fit captures essentially the whole span and the ratio
-    is ~1, two orders above the bound. The retired kernel's actual leak is pinned separately by
+    is ~1 -- one order above the bound (explicit Euler measures 1.058 against the 0.1 bound
+    here). The retired kernel's actual leak is pinned separately by
     test_legacy_kernel_leaks_energy_as_documented.
     """
     from predictability_horizon.systems.acrobot import _canonical_energy, _midpoint_np
@@ -188,7 +193,7 @@ def test_acrobot_energy_magnitude_bounded_over_120s():
     drift = abs(e[-1] - e[0]) / abs(e[0])
     print(f"[criterion 4b] float32 span={span:.3e}  end drift={drift:.3e}")
     assert span < 2e-2  # measured 1.38e-3..6.81e-3 across ICs; legacy kernel gives 5.26
-    assert drift < 1e-2  # measured ~3e-4; legacy kernel loses 1.36 (136%) over this window
+    assert drift < 1e-2  # measured ~3e-4; legacy kernel loses 1.2782 (127.8%) over this window
 
 
 @pytest.mark.integration

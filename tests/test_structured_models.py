@@ -51,8 +51,35 @@ def test_volume_penalty_reduces_spectrum_drift():
     assert abs(sp) < abs(sb)
 
 
+def _pdot_rel_err(hnn, ds, dt: float, n: int = 256) -> float:
+    """Relative error of the trained HNN's momentum-rate vector field against the finite-
+    difference pdot of the data it was fit to. This is what moves under training or a
+    coordinate regression -- unlike a symplectic-Euler determinant, which is architecture-
+    guaranteed and reads the same whether or not the network has been trained at all."""
+    x = torch.tensor(ds.x[:n], dtype=torch.float32)
+    y = torch.tensor(ds.y[:n], dtype=torch.float32)
+    q = x[:, :2].detach().requires_grad_(True)
+    p = x[:, 2:].detach().requires_grad_(True)
+    _, pd = hnn.vector_field(q, p)
+    pdot_ref = (y[:, 2:] - x[:, 2:]) / dt
+    return (torch.norm(pd - pdot_ref) / torch.norm(pdot_ref)).item()
+
+
 @pytest.mark.integration
 def test_hnn_spectrum_on_traj_is_canonical():
+    """Spectrum sum near 0 is architecture-guaranteed; the pdot fit is what certifies training.
+
+    ``hnn_spectrum_on_traj``'s exponent sum reads near 0 for an HNN because its symplectic-
+    Euler one-step map has det J ~= 1 (to O(dt^2)) EVERYWHERE in (theta, p) -- true for a
+    randomly-initialised, untrained network exactly as for a trained one. Measured on an
+    untrained HNN(params, dt): sum=-0.000005, largest=0.0036 (both comfortably inside the
+    bounds below, on pure noise). So ``abs(sum) < 0.2`` alone certifies the architecture, not
+    the fit. ``largest > 0.3`` is somewhat discriminating on its own (0.0036 untrained would
+    fail it) but is loose: 0.31 and 5.0 both pass it against a true lambda_1 ~ 0.99. The pdot
+    relative-error assertion below is what actually ties this test to the trained model:
+    measured untrained rel err ~1.00 (fails the < 0.5 bound below) vs. trained (120 epochs)
+    0.0024 -- a ~400x margin.
+    """
     from predictability_horizon.structured_models import hnn_spectrum_on_traj, train_hnn
     from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
     from predictability_horizon.warpsim import rollout
@@ -70,12 +97,30 @@ def test_hnn_spectrum_on_traj_is_canonical():
         4000,
     )[400:]
     spec = hnn_spectrum_on_traj(hnn, traj, dt=s.suggested_dt, k=4)
+    # architecture-only (see docstring): passes on an untrained network by construction.
     assert abs(float(np.sum(spec.exponents))) < 0.2  # volume-preserving (canonical, exact)
     assert spec.largest > 0.3  # a sensible positive exponent, not garbage
+
+    rel_pdot = _pdot_rel_err(hnn, ds, s.suggested_dt)
+    print(f"HNN pdot relative error = {rel_pdot:.4f}")
+    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0024 (~400x margin)
+    assert rel_pdot < 0.5
 
 
 @pytest.mark.integration
 def test_hnn_is_near_volume_preserving():
+    """Spectrum sum near 0 is architecture-guaranteed; the pdot fit is what certifies training.
+
+    ``model_spectrum_sum`` reading near 0 is an ARCHITECTURE property of the HNN: its
+    symplectic-Euler step has det J ~= 1 (to O(dt^2)) at every (theta, p), true for a
+    randomly-initialised, untrained network exactly as for a trained one (measured: untrained
+    spectrum_sum=-0.000005, trained (200 epochs)=-0.009869 -- both comfortably inside the
+    bound below). So ``abs(ss) < 0.3`` alone certifies the architecture, not training, data,
+    or coordinates -- see the caveat in ``structured_models.model_spectrum_sum``. The pdot
+    relative-error assertion below is what actually moves under training or a coordinate
+    regression: measured untrained pdot rel err ~1.00 (fails the < 0.5 bound below) vs.
+    trained 0.0026 -- a ~190x margin.
+    """
     from predictability_horizon.structured_models import model_spectrum_sum, train_hnn
     from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
     from predictability_horizon.worldmodel import make_dataset
@@ -85,8 +130,13 @@ def test_hnn_is_near_volume_preserving():
     hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=200, seed=0)
     ss = model_spectrum_sum(hnn, s, np.array([2.5, 0.0, 0.0, 0.0]))
     print(f"HNN spectrum_sum={ss:.4f}")
-    # symplectic-by-construction ⇒ spectrum sum near 0 (loose tol; explicit integrator drifts)
+    # architecture-only (see docstring): passes on an untrained network by construction.
     assert abs(ss) < 0.3
+
+    rel_pdot = _pdot_rel_err(hnn, ds, s.suggested_dt)
+    print(f"HNN pdot relative error = {rel_pdot:.4f}")
+    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0026 (~190x margin)
+    assert rel_pdot < 0.5
 
 
 @pytest.mark.integration

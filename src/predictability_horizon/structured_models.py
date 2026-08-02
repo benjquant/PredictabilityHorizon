@@ -223,7 +223,10 @@ def model_spectrum_sum(
     rollout) — avoids model-drift artifacts, matching the Part-B audit's apples-to-apples
     convention. All models now live in canonical (θ,p), so this is directly comparable across
     the plain MLP, the volume-penalty MLP and the HNN. For a meaningful λ₁ (not just the
-    volume sum) on the HNN, use ``hnn_spectrum_on_traj``.
+    volume sum) on the HNN, use ``hnn_spectrum_on_traj``; the volume *sum* still reads ≈0 here
+    for an HNN only because its symplectic-Euler map has det J ≈ 1 (to O(dt²)) ANYWHERE in
+    (θ,p) space, on an untrained network exactly as on a trained one -- a near-zero sum is
+    architecture-guaranteed, not evidence about training or fit quality.
     """
     model.eval()
     true_traj = rollout(
