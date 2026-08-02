@@ -27,9 +27,10 @@ STEPS_OK = 380
 STEPS_WALL = 951
 
 # reach_ratio at a single (T, seed) spans FIVE ORDERS OF MAGNITUDE near and past the wall (e.g. at
-# STEPS_WALL: 4.65, 1.08, 0.29, 3.55, 10.9, 373 across seeds 0-5) -- a single seed is a coin flip,
-# not a measurement. Every assertion below is on the median over N_SEED seeds, matching the
-# multi-seed statistic reach_horizon_sweep already uses for the figures.
+# STEPS_WALL: 4.65, 1.08, 0.29, 3.55, 10.9, 373 across seeds 0-5) -- a single seed is a coin flip.
+# The median is the outlier-robust choice on such heavy-tailed statistics. Note: this deliberately
+# differs from reach_horizon_sweep (arithmetic mean) and the figures (geometric mean), so no shared
+# aggregation assumption is valid across test, code, and plots.
 N_SEED = 6
 
 
