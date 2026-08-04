@@ -46,6 +46,11 @@ _ENVELOPE_STATES = (
     np.array([-0.7, 2.2, -14.85, 11.55]),  # top of the swing-up envelope (E = 63.72, |p| = 14.85)
 )
 _ENVELOPE_DT_TOL = ((5e-4, 1e-6), (5e-3, 1e-4))
+# Torque axis. Until 2026-08 every acrobot correctness test ran the motor off, so _cayley_jacobian's
+# `u` argument had never once been executed with a nonzero value anywhere in the repo. +/-5 N m is
+# the scale of the gravitational torque on link 2 (m2*g*l2 = 9.81); the Picard contraction rate is
+# (dt/2)*L(E) and so is bounded by dt, not by tau, which is why no extra passes are needed here.
+_ENVELOPE_TORQUES = (0.0, 5.0, -5.0)
 
 
 def test_acrobot_step_matches_the_float64_reference():
@@ -55,10 +60,11 @@ def test_acrobot_step_matches_the_float64_reference():
     sys = SYSTEMS["acrobot"]
     for dt in (5e-4, 5e-3):
         for x in _ENVELOPE_STATES:
-            got = rollout(sys.step_kernel, x, np.zeros(1), sys.default_params, dt, 1)[1]
-            want = _midpoint_np(x, 0.0, sys.default_params, dt)[0]
-            # float32 kernel vs float64 reference: resolution is ~1e-7 * |z|, and |p| reaches 14.85
-            assert np.allclose(got, want, rtol=1e-4, atol=1e-5)
+            for tau in _ENVELOPE_TORQUES:
+                got = rollout(sys.step_kernel, x, np.full(1, tau), sys.default_params, dt, 1)[1]
+                want = _midpoint_np(x, tau, sys.default_params, dt)[0]
+                # float32 kernel vs float64 reference: resolution ~1e-7 * |z|, |p| reaches 14.85
+                assert np.allclose(got, want, rtol=1e-4, atol=1e-5)
 
 
 def test_acrobot_stress_probe_outside_the_envelope():
@@ -86,13 +92,20 @@ def test_acrobot_analytic_jacobian_matches_autodiff():
 
     Autodiff differentiates the executed kernel; the Cayley formula describes the map we
     intended. An under-converged fixed point separates them and nothing else detects it.
+
+    Swept over _ENVELOPE_TORQUES because the Cayley derivation claims the constant force drops
+    out of the derivative and reaches the Jacobian only through zbar. That is a claim about the
+    torque path, so it is only evidence if a nonzero torque is actually run.
     """
     sys = SYSTEMS["acrobot"]
     for dt, tol in _ENVELOPE_DT_TOL:
         for x in _ENVELOPE_STATES:
-            Ja = sys.jacobian(x, 0.0, sys.default_params, dt)  # noqa: N806
-            Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, dt)  # noqa: N806
-            assert np.abs(Ja - Jad).max() < tol
+            for tau in _ENVELOPE_TORQUES:
+                Ja = sys.jacobian(x, tau, sys.default_params, dt)  # noqa: N806
+                Jad = autodiff_jacobian(  # noqa: N806
+                    sys.step_kernel, x, tau, sys.default_params, dt
+                )
+                assert np.abs(Ja - Jad).max() < tol
 
 
 def test_acrobot_is_symplectic_under_autodiff():
@@ -102,12 +115,22 @@ def test_acrobot_is_symplectic_under_autodiff():
     actually ran. test_cayley_transform_is_algebraically_symplectic asserts det J = 1 too, but
     that holds identically for any Hamiltonian A = J4 @ S with symmetric S, so it certifies the
     Cayley arithmetic rather than the physics and must never be cited in its place.
+
+    Swept over _ENVELOPE_TORQUES: a constant generalized force is a time-dependent shift of the
+    Hamiltonian flow and must leave det J = 1 untouched. Sweeping tau is what makes that a
+    measurement rather than an assumption, and it extends the paper's Section 2.3 symplecticity
+    claim to the actuated regime that Figure 2 and all of trajopt actually run in. Torque costs
+    nothing in margin: worst |det J - 1| over the sweep is 1.39e-7 at dt=5e-4 (vs 1.14e-7 at
+    tau=0) and 2.59e-7 at dt=5e-3 (vs 1.50e-7) -- ~1 float32 ulp either way.
     """
     sys = SYSTEMS["acrobot"]
     for dt, tol in _ENVELOPE_DT_TOL:
         for x in _ENVELOPE_STATES:
-            Jad = autodiff_jacobian(sys.step_kernel, x, 0.0, sys.default_params, dt)  # noqa: N806
-            assert abs(np.linalg.det(Jad) - 1.0) < tol
+            for tau in _ENVELOPE_TORQUES:
+                Jad = autodiff_jacobian(  # noqa: N806
+                    sys.step_kernel, x, tau, sys.default_params, dt
+                )
+                assert abs(np.linalg.det(Jad) - 1.0) < tol
 
 
 def test_acrobot_energy_bounded_over_the_working_horizon():
@@ -196,9 +219,63 @@ def test_acrobot_energy_magnitude_bounded_over_120s():
     assert drift < 1e-2  # measured ~3e-4; legacy kernel loses 1.2782 (127.8%) over this window
 
 
+def test_acrobot_torque_obeys_the_work_energy_theorem():
+    """The elbow torque is a GENUINE generalized force on p_2, checked against physics.
+
+    Every other acrobot correctness test runs the motor off (u = 0.0), and trajopt cannot fill
+    the gap: it generates its targets by rolling out a reference control through this same
+    kernel (trajopt.py:132), so target and trajectory share any error in the torque path and
+    the optimiser converges just as happily onto a self-consistently wrong answer. This test
+    checks the kernel from OUTSIDE the code, against the work-energy theorem.
+
+    For implicit midpoint with a constant force F = (0, 0, 0, tau),
+
+        dH = grad H(zbar) . dt (J grad H(zbar) + F) = dt * tau * omegabar_2
+
+    because grad H . J grad H = 0 kills the conservative part, leaving only the work done by
+    the force. omega_2 = (dH/dp)_2, so the work integral is sum_k dt * tau * omegabar_2.
+
+    zbar needs no internal access: the scheme sets z_{k+1} = 2 zbar - z_k, so
+    zbar = (z_k + z_{k+1})/2 exactly, recovered from the shipped kernel's own output.
+
+    Discriminating, measured by sabotaging the kernel and rerunning: rerouting tau from p_2 to
+    p_1 takes the worst relative error from 1.4e-4 to 6.5e-1 (325x past the bound); flipping
+    its sign gives exactly 2.0, since the energy input reverses. A wrong scale factor k shows
+    up directly as rel = |k - 1|.
+    """
+    from predictability_horizon.systems.acrobot import _canonical_energy, _mass_matrix
+
+    sys = SYSTEMS["acrobot"]
+    params = sys.default_params
+    dt = sys.suggested_dt
+    T = int(2.0 / dt)  # noqa: N806
+    for tau in (0.5, 2.0, -1.0):  # sign and magnitude both covered
+        states = rollout(sys.step_kernel, np.array([2.5, 0.0, 0.0, 0.0]),
+                         np.full(T, tau), params, dt, T)
+        zbar = 0.5 * (states[:-1] + states[1:])
+        omega_bar2 = np.array(
+            [np.linalg.solve(_mass_matrix(z[:2], params), z[2:])[1] for z in zbar]
+        )
+        work = dt * tau * omega_bar2.sum()
+        de = _canonical_energy(states[-1], params) - _canonical_energy(states[0], params)
+        rel = abs(de - work) / abs(work)
+        print(f"[work-energy] tau={tau:+.1f}  dE={de:+.5f}  work={work:+.5f}  rel={rel:.2e}")
+        # measured 2.1e-5..1.4e-4 over these torques (float32 roundoff, not the scheme's O(dt^2):
+        # it does not shrink at dt=1e-4). 2e-3 leaves an order of margin for device reordering.
+        assert rel < 2e-3
+
+
 @pytest.mark.integration
 def test_legacy_kernel_leaks_energy_as_documented():
-    """Pins the retired defect so the roadmap's drift table stays reproducible from the repo."""
+    """Pins the retired defect so the roadmap's drift table stays reproducible from the repo.
+
+    Two-sided on purpose. This test has exactly one job -- keep ONE quoted number executable --
+    and the previous one-sided `drift < -0.15` passed just as happily on a kernel losing 80%:
+    it certified "leaks a lot", not "leaks 20.8%". The +/-1pp window is ~5% of the effect, wide
+    enough that float32 nondeterminism cannot reach it and narrow enough that any qualitative
+    change to the retired scheme falls outside (measured: doubling dt to 1e-3 gives -0.2615,
+    comfortably clear of the [-0.2178, -0.1978] window).
+    """
     from predictability_horizon.systems.acrobot import _legacy_energy, legacy_acrobot_step
 
     params = np.array([1.0, 1.0, 1.0, 1.0, 9.81])
@@ -208,7 +285,8 @@ def test_legacy_kernel_leaks_energy_as_documented():
                      np.zeros(T), params, dt, T)
     e = np.array([_legacy_energy(s, params) for s in states])
     drift = (e[-1] - e[0]) / abs(e[0])
-    assert drift < -0.15  # roadmap table: -20.8% at 10 s
+    print(f"[legacy] 10 s energy drift = {drift:.6f}")
+    assert drift == pytest.approx(-0.2078, abs=0.01)  # measured -0.207762; roadmap: -20.8%
 
 
 def test_acrobot_is_chaotic():
