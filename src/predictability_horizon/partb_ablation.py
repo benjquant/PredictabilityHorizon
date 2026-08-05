@@ -375,6 +375,17 @@ Reportability alone is not enough: with tight spreads a fraction of a percent ca
 noise and still not be worth a picture.
 """
 
+_SHORTFALL_FLOOR = 0.10
+"""Floors the shortfall denominator at this fraction of the true exponent.
+
+Without it the panel rule is unsound exactly where the study hopes to land. Corner A is the
+corner expected to sit CLOSEST to truth, so a small shortfall is the good outcome, not an edge
+case -- and dividing by it makes `share` diverge, handing a panel to any effect at all. Worse,
+at shortfall == 0 exactly a bare `if shortfall` guard flips to the opposite failure and refuses
+a panel however large the effect. Flooring the denominator removes both branches and is
+continuous across zero, so nothing depends on which side of it the study happens to land.
+"""
+
 
 @dataclass(frozen=True)
 class Effect:
@@ -402,7 +413,10 @@ class Summary:
 def _effect(result: AblationResult, name: str, cell: str, shortfall: float) -> Effect:
     delta = result.median(cell) - result.median("A")
     threshold = max(result.spread("A"), result.spread(cell))
-    share = abs(delta) / abs(shortfall) if shortfall else 0.0
+    # Floored denominator -- see _SHORTFALL_FLOOR. Never divide by the raw shortfall: it is
+    # smallest precisely when the model is best, which would inflate every effect into a panel.
+    denom = max(abs(shortfall), _SHORTFALL_FLOOR * abs(result.true_lambda1))
+    share = abs(delta) / denom
     return Effect(
         name=name,
         delta=delta,

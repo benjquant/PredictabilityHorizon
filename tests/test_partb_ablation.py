@@ -210,3 +210,71 @@ def test_best_mu_is_the_one_closest_to_the_true_exponent():
         a=[0.62] * 5, b=[0.62] * 5, c=[0.62] * 5, d=[0.62] * 5
     ))
     assert s.best_mu == 10.0  # medians 3.1 / 2.9 / 2.6 against a true 1.00
+
+
+def test_panel_rule_is_not_inflated_by_a_vanishing_shortfall():
+    """The regime the study hopes for must not trivially earn a panel.
+
+    Corner A is meant to land closest to truth, so a small shortfall is the GOOD outcome. An
+    unfloored `abs(delta)/abs(shortfall)` diverges there and hands a panel to any effect at
+    all; at shortfall == 0 exactly, a bare `if shortfall` guard flips to the opposite failure
+    and refuses a panel however large the effect. Both are pinned here.
+    """
+    from predictability_horizon.partb_ablation import summarise
+
+    # A sits exactly on truth -> shortfall 0. A tiny but reportable effect must NOT panel.
+    tiny = summarise(_fake_result(
+        a=[1.00, 1.00, 1.00, 1.00, 1.00],
+        b=[1.01, 1.01, 1.01, 1.01, 1.01],
+        c=[1.00, 1.00, 1.00, 1.00, 1.00],
+        d=[1.01, 1.01, 1.01, 1.01, 1.01],
+    ))
+    assert tiny.shortfall == pytest.approx(0.0)
+    assert {e.name for e in tiny.effects if e.reportable} == {"integrator"}
+    assert not tiny.second_panel  # 0.01 / (0.10 * 1.00) = 0.10 < 0.25
+
+    # Same zero shortfall, but a large effect MUST still panel.
+    big = summarise(_fake_result(
+        a=[1.00, 1.00, 1.00, 1.00, 1.00],
+        b=[1.50, 1.50, 1.50, 1.50, 1.50],
+        c=[1.00, 1.00, 1.00, 1.00, 1.00],
+        d=[1.50, 1.50, 1.50, 1.50, 1.50],
+    ))
+    assert big.shortfall == pytest.approx(0.0)
+    assert big.second_panel  # 0.50 / (0.10 * 1.00) = 5.0 >= 0.25
+
+
+def test_reportable_requires_strictly_exceeding_the_spread():
+    """The rule says 'exceeds', not 'at least'. Pin the boundary.
+
+    This is the single most safety-critical comparison in the module: weakening `>` to `>=`
+    would license an effect exactly equal to the noise, and every other test would still pass.
+    """
+    from predictability_horizon.partb_ablation import summarise
+
+    # A spans 0.60-0.70 (spread 0.10); B's median sits exactly 0.10 above A's.
+    s = summarise(_fake_result(
+        a=[0.60, 0.62, 0.65, 0.68, 0.70],
+        b=[0.70, 0.72, 0.75, 0.78, 0.80],
+        c=[0.60, 0.62, 0.65, 0.68, 0.70],
+        d=[0.70, 0.72, 0.75, 0.78, 0.80],
+    ))
+    by_name = {e.name: e for e in s.effects}
+    assert by_name["integrator"].delta == pytest.approx(0.10)
+    assert by_name["integrator"].threshold == pytest.approx(0.10)
+    assert not by_name["integrator"].reportable  # equal is NOT "exceeds"
+
+
+def test_additive_effects_are_reported_as_a_decomposition():
+    """The positive branch of the additivity check, which nothing else pins."""
+    from predictability_horizon.partb_ablation import summarise
+
+    # integrator +0.20, data +0.20, D sits +0.40 above A: exactly additive.
+    s = summarise(_fake_result(
+        a=[0.60, 0.61, 0.62, 0.63, 0.64],
+        b=[0.80, 0.81, 0.82, 0.83, 0.84],
+        c=[0.80, 0.81, 0.82, 0.83, 0.84],
+        d=[1.00, 1.01, 1.02, 1.03, 1.04],
+    ))
+    assert s.additive
+    assert s.additivity_residual == pytest.approx(0.0)
