@@ -53,13 +53,16 @@ def test_hnn_spectrum_on_traj_is_canonical():
     assertion below would not catch, since a plain MLP fits pdot perfectly well. The pdot
     relative error is what actually moves under training.
 
-    Measured (120 epochs, seed 0): sum=-7.3e-06, largest=1.4754. The ``abs(sum) < 1e-4`` bound
-    is ~14x that magnitude, tightened from 0.2 now that the step is exactly symplectic rather
-    than symplectic to O(dt^2). ``largest > 0.3`` is somewhat discriminating on its own (an
-    untrained network reads ~0.0036 and would fail it) but is loose: 0.31 and 5.0 both pass it
-    against a true lambda_1 of 1.554 on this window. The pdot relative-error assertion below is
-    what actually ties this test to the trained model: measured untrained rel err ~1.00 (fails
-    the < 0.5 bound below) vs. trained (120 epochs) 0.0024 -- a ~400x margin.
+    Measured (120 epochs, seed 0) over the test's 1.8 s window (3600 steps at dt=5e-4, QR seed 0):
+    sum=-7.3e-06, largest=1.4754. The ``abs(sum) < 1e-4`` bound is ~14x that magnitude,
+    tightened from 0.2 now that the step is exactly symplectic rather than symplectic to O(dt^2).
+    ``largest > 0.3`` is somewhat discriminating on its own (an untrained network reads ~0.0036
+    and would fail it) but is loose: 0.31 and 5.0 both pass it against a true lambda_1 of 1.554
+    on this same 1.8 s window (dt=5e-4, QR seed 0). Note: this tripwire's short-window, single-QR
+    protocol is a fast test gating and must not be compared to the 54 s, 8-QR-seed averaging
+    protocol the paper reports. The pdot relative-error assertion below is what actually ties this
+    test to the trained model: measured untrained rel err ~1.00 (fails the < 0.5 bound below) vs.
+    trained (120 epochs) 0.0024 -- a ~400x margin.
     """
     from predictability_horizon.structured_models import hnn_spectrum_on_traj, train_hnn
     from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
