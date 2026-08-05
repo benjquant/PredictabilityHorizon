@@ -1,5 +1,4 @@
-"""Phase 2: structure-preserving world models for the acrobot (canonical coordinates,
-mass matrix + transforms)."""
+"""Phase 2: structure-preserving world models for the acrobot (canonical coordinates)."""
 
 from __future__ import annotations
 
@@ -17,29 +16,6 @@ from predictability_horizon.lyapunov import lyapunov_spectrum
 from predictability_horizon.systems import System
 from predictability_horizon.warpsim import rollout
 from predictability_horizon.worldmodel import MLP, Dataset
-
-
-def acrobot_mass_matrix(theta: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
-    """(...,2) angles -> (...,2,2) mass matrix M(θ); p = M(θ) ω. Matches systems/acrobot KE."""
-    m1, m2, l1, l2, _g = params
-    c = torch.cos(theta[..., 0] - theta[..., 1])
-    M = torch.zeros(*theta.shape[:-1], 2, 2, dtype=theta.dtype)  # noqa: N806
-    M[..., 0, 0] = (m1 + m2) * l1 * l1
-    M[..., 0, 1] = m2 * l1 * l2 * c
-    M[..., 1, 0] = m2 * l1 * l2 * c
-    M[..., 1, 1] = m2 * l2 * l2
-    return M
-
-
-def omega_to_p(theta: torch.Tensor, omega: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
-    """Velocities ω -> conjugate momenta p = M(θ) ω."""
-    return torch.einsum("...ij,...j->...i", acrobot_mass_matrix(theta, params), omega)
-
-
-def p_to_omega(theta: torch.Tensor, p: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
-    """Conjugate momenta p -> velocities ω = M(θ)⁻¹ p."""
-    M = acrobot_mass_matrix(theta, params)  # noqa: N806
-    return torch.linalg.solve(M, p.unsqueeze(-1)).squeeze(-1)
 
 
 def _logdet_jac(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -109,9 +85,8 @@ class HNN(nn.Module):
     topology.
     """
 
-    def __init__(self, params: torch.Tensor, dt: float, hidden: int = 128) -> None:
+    def __init__(self, dt: float, hidden: int = 128) -> None:
         super().__init__()
-        self.register_buffer("params", params)
         self.dt = float(dt)
         self.dim = 4
         self.net = nn.Sequential(
@@ -157,7 +132,6 @@ class HNN(nn.Module):
 
 def train_hnn(
     ds: Dataset,
-    params: npt.NDArray[np.float64],
     dt: float,
     epochs: int = 200,
     lr: float = 1e-3,
@@ -172,8 +146,7 @@ def train_hnn(
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
-    params_t = torch.as_tensor(np.asarray(params), dtype=torch.float32)
-    model = HNN(params_t, dt)
+    model = HNN(dt)
     model.train()
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     x_t = torch.tensor(ds.x, dtype=torch.float32)

@@ -711,7 +711,7 @@ def make_fig7_structured_spectrum(out: Path, fast: bool = False) -> Path:
     ds = make_dataset(s, n_traj=n_traj, T=t_data, seed=0)
     base = train_world_model(ds, epochs=epochs, seed=0)
     pen = train_volume_penalty_mlp(ds, epochs=epochs, penalty=1.0, seed=0)
-    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=hnn_epochs, seed=0)
+    hnn = train_hnn(ds, s.suggested_dt, epochs=hnn_epochs, seed=0)
 
     true_traj = rollout(
         cast(wp.Kernel, s.step_kernel),

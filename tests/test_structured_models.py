@@ -2,33 +2,6 @@ import numpy as np
 import pytest
 import torch
 
-from predictability_horizon.structured_models import acrobot_mass_matrix, omega_to_p, p_to_omega
-
-
-def test_mass_matrix_roundtrip():
-    params = torch.tensor([1.0, 1.0, 1.0, 1.0, 9.81])
-    theta = torch.tensor([[0.3, -0.7], [1.2, 0.4]])
-    omega = torch.tensor([[0.5, -0.2], [1.1, 0.3]])
-    p = omega_to_p(theta, omega, params)
-    omega2 = p_to_omega(theta, p, params)
-    assert torch.allclose(omega, omega2, atol=1e-5)
-
-
-def test_mass_matrix_matches_kinetic_energy():
-    # ½ ωᵀ M ω must equal the acrobot KE used in systems/acrobot.py
-    params = torch.tensor([1.0, 1.0, 1.0, 1.0, 9.81])
-    th = torch.tensor([[0.3, -0.7]])
-    w = torch.tensor([[0.5, -0.2]])
-    M = acrobot_mass_matrix(th, params)  # noqa: N806
-    ke_M = 0.5 * torch.einsum("bi,bij,bj->b", w, M, w)  # noqa: N806
-    m1, m2, l1, l2, _ = params
-    th1, th2 = th[0]
-    w1, w2 = w[0]
-    ke_ref = 0.5 * m1 * (l1 * w1) ** 2 + 0.5 * m2 * (
-        (l1 * w1) ** 2 + (l2 * w2) ** 2 + 2 * l1 * l2 * w1 * w2 * torch.cos(th1 - th2)
-    )
-    assert torch.allclose(ke_M[0], ke_ref, atol=1e-5)
-
 
 @pytest.mark.integration
 def test_volume_penalty_reduces_spectrum_drift():
@@ -72,7 +45,7 @@ def test_hnn_spectrum_on_traj_is_canonical():
     ``hnn_spectrum_on_traj``'s exponent sum reads near 0 for an HNN because its symplectic-
     Euler one-step map has det J ~= 1 (to O(dt^2)) EVERYWHERE in (theta, p) -- true for a
     randomly-initialised, untrained network exactly as for a trained one. Measured on an
-    untrained HNN(params, dt): sum=-0.000005, largest=0.0036 (both comfortably inside the
+    untrained HNN(dt): sum=-0.000005, largest=0.0036 (both comfortably inside the
     bounds below, on pure noise). So ``abs(sum) < 0.2`` alone certifies the architecture, not
     the fit. ``largest > 0.3`` is somewhat discriminating on its own (0.0036 untrained would
     fail it) but is loose: 0.31 and 5.0 both pass it against a true lambda_1 ~ 0.99. The pdot
@@ -87,7 +60,7 @@ def test_hnn_spectrum_on_traj_is_canonical():
 
     s = SYSTEMS["acrobot"]
     ds = make_dataset(s, n_traj=80, T=2000, seed=0)
-    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=120, seed=0)
+    hnn = train_hnn(ds, s.suggested_dt, epochs=120, seed=0)
     traj = rollout(
         s.step_kernel,
         np.array([2.5, 0, 0, 0.0]),
@@ -127,7 +100,7 @@ def test_hnn_is_near_volume_preserving():
 
     s = SYSTEMS["acrobot"]
     ds = make_dataset(s, n_traj=80, T=2000, seed=0)
-    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=200, seed=0)
+    hnn = train_hnn(ds, s.suggested_dt, epochs=200, seed=0)
     ss = model_spectrum_sum(hnn, s, np.array([2.5, 0.0, 0.0, 0.0]))
     print(f"HNN spectrum_sum={ss:.4f}")
     # architecture-only (see docstring): passes on an untrained network by construction.
@@ -161,7 +134,7 @@ def test_hnn_trains_directly_on_canonical_data():
 
     s = SYSTEMS["acrobot"]
     ds = make_dataset(s, n_traj=40, T=1000, seed=0)
-    hnn = train_hnn(ds, s.default_params, s.suggested_dt, epochs=60, seed=0)
+    hnn = train_hnn(ds, s.suggested_dt, epochs=60, seed=0)
 
     x = torch.tensor(ds.x[:256], dtype=torch.float32)
     y = torch.tensor(ds.y[:256], dtype=torch.float32)
