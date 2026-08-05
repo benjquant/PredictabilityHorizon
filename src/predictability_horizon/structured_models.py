@@ -17,6 +17,16 @@ from predictability_horizon.systems import System
 from predictability_horizon.warpsim import rollout
 from predictability_horizon.worldmodel import MLP, Dataset
 
+_N_FP_ITER = 6
+"""Picard passes per implicit-midpoint step, matching systems/acrobot.py's _N_FP_ITER.
+
+The same count for the same reason: the contraction rate is (dt/2)*L, so the binding
+constraint is dt, and 6 saturates at both the production step size and the coarser one used in
+tests. FIXED rather than residual-triggered -- a state-dependent trip count would make the map
+piecewise-defined and its Jacobian discontinuous across the switching surfaces, and this module
+measures Jacobian-derived observables (lambda_1, det J).
+"""
+
 
 def _logdet_jac(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
     """log|det ∂model/∂x| for each row of a batch x (small dim -> full Jacobian)."""
@@ -76,13 +86,13 @@ def _model_jac_fn(
 
 
 class HNN(nn.Module):
-    """Hamiltonian NN as a canonical (θ,p) one-step map via symplectic Euler.
+    """Hamiltonian NN as a canonical (θ,p) one-step map via implicit midpoint.
 
     Learns H_φ(q,p) directly on the canonical coords the simulator emits (q=θ, p already
     the canonical momentum — no ω->p conversion happens here or anywhere upstream); the
-    vector field q̇=∂H/∂p, ṗ=-∂H/∂q is Hamiltonian, and one symplectic-Euler step gives a
-    (θ,p)->(θ',p') map. Angles enter H through a (cosθ,sinθ) embedding to respect the S¹
-    topology.
+    vector field q̇=∂H/∂p, ṗ=-∂H/∂q is Hamiltonian, and one implicit-midpoint step gives a
+    (θ,p)->(θ',p') map, symplectic exactly rather than to O(dt²). Angles enter H through a
+    (cosθ,sinθ) embedding to respect the S¹ topology.
     """
 
     def __init__(self, dt: float, hidden: int = 128) -> None:
@@ -117,17 +127,36 @@ class HNN(nn.Module):
         return dh_dp, -dh_dq
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Interprets input as canonical (q, p); symplectic Euler in (q,p) space. H_φ is
-        # non-separable (q and p are jointly embedded), so this explicit step is symplectic
-        # only to O(dt²): det J = 1 + O(dt²) per step (measured spectrum sum ≈0.001) — i.e.
-        # approximately, not exactly, volume-preserving. Training data is already canonical
-        # (θ,p).
+        # Interprets input as canonical (q, p) and advances it with IMPLICIT MIDPOINT, the same
+        # scheme systems/acrobot.py uses:  zbar = z + (dt/2) J grad H(zbar),  z' = 2 zbar - z.
+        # Symplectic for any Hamiltonian, second-order and time-reversible -- so det J = 1
+        # exactly, not to O(dt^2). H_phi is non-separable (q and p are jointly embedded), which
+        # is precisely why the retired explicit symplectic-Euler step was only approximately
+        # volume-preserving here. Solved by _N_FP_ITER Picard passes, a fixed count so the map
+        # stays straight-line and differentiable end to end.
+        q, p = x[..., :2], x[..., 2:]
+        qb, pb = q, p
+        for _ in range(_N_FP_ITER):
+            qd, pd = self.vector_field(qb, pb)
+            qb = q + 0.5 * self.dt * qd
+            pb = p + 0.5 * self.dt * pd
+        return torch.cat([2.0 * qb - q, 2.0 * pb - p], dim=-1)
+
+    def legacy_euler_step(self, x: torch.Tensor) -> torch.Tensor:
+        """RETIRED. The pre-spec-3 explicit symplectic-Euler step. NOT used in production.
+
+        p' = p + dt * pdot(q, p);  q' = q + dt * qdot(q, p'). Symplectic only to O(dt^2) on a
+        non-separable H -- and H_phi IS non-separable, because q and p are jointly embedded --
+        which is the same defect spec 2 removed from the ground truth. Kept, like
+        systems/acrobot.py's legacy_acrobot_step, so the scheme stays executable: corners B and
+        D of the Part-B ablation measure one learned Hamiltonian under this step and under
+        `forward`, and the difference is what the model's own integrator was costing.
+        """
         q, p = x[..., :2], x[..., 2:]
         _, pd = self.vector_field(q, p)
-        p_new = p + self.dt * pd  # symplectic Euler: momentum first
+        p_new = p + self.dt * pd
         qd2, _ = self.vector_field(q, p_new)
-        q_new = q + self.dt * qd2
-        return torch.cat([q_new, p_new], dim=-1)
+        return torch.cat([q + self.dt * qd2, p_new], dim=-1)
 
 
 def train_hnn(
@@ -197,9 +226,10 @@ def model_spectrum_sum(
     convention. All models now live in canonical (θ,p), so this is directly comparable across
     the plain MLP, the volume-penalty MLP and the HNN. For a meaningful λ₁ (not just the
     volume sum) on the HNN, use ``hnn_spectrum_on_traj``; the volume *sum* still reads ≈0 here
-    for an HNN only because its symplectic-Euler map has det J ≈ 1 (to O(dt²)) ANYWHERE in
-    (θ,p) space, on an untrained network exactly as on a trained one -- a near-zero sum is
-    architecture-guaranteed, not evidence about training or fit quality.
+    for an HNN only because its implicit-midpoint map has det J = 1 EXACTLY — symplectic for
+    any Hamiltonian, not to O(dt²) — ANYWHERE in (θ,p) space, on an untrained network exactly
+    as on a trained one -- a near-zero sum is architecture-guaranteed, not evidence about
+    training or fit quality.
     """
     model.eval()
     true_traj = rollout(
