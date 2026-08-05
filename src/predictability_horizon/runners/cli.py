@@ -61,8 +61,8 @@ def reproduce(out: str) -> None:
 @main.command()
 @click.option("--out", default="writeup/figures/partb_ablation.json", type=click.Path())
 def ablation(out: str) -> None:
-    """Run the Part-B four-corner ablation and the penalty sweep (~4 h on CPU)."""
-    from predictability_horizon.partb_ablation import (  # type: ignore[attr-defined]
+    """Run the Part-B four-corner ablation and the penalty sweep (~5 h on CPU)."""
+    from predictability_horizon.partb_ablation import (
         report_lines,
         run_ablation,
         summarise,

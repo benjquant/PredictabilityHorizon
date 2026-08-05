@@ -124,3 +124,89 @@ def test_penalty_labels_round_trip():
     labels = [penalty_label(mu) for mu in _MUS]
     assert labels == ["penalty:mu=0.1", "penalty:mu=1", "penalty:mu=10"]
     assert len(set(labels)) == len(_MUS)
+
+
+def _fake(label, values):
+    from predictability_horizon.partb_ablation import Run
+
+    return [Run(label, i, v, 0.0, 0.0) for i, v in enumerate(values)]
+
+
+def _fake_result(a, b, c, d, true_lambda1=1.00):
+    from predictability_horizon.partb_ablation import AblationResult, penalty_label
+
+    runs = _fake("A", a) + _fake("B", b) + _fake("C", c) + _fake("D", d)
+    runs += _fake("plain", [2.4] * 5)
+    runs += _fake(penalty_label(0.1), [3.1] * 5)
+    runs += _fake(penalty_label(1.0), [2.9] * 5)
+    runs += _fake(penalty_label(10.0), [2.6] * 5)
+    return AblationResult(
+        runs=runs,
+        true_lambda1=true_lambda1,
+        true_qr_spread=0.03,
+        dt=5e-4,
+        n_steps=109_200,
+        transient_steps=1_200,
+        qr_seeds=8,
+    )
+
+
+def test_effect_below_the_seed_spread_is_not_reportable():
+    """The rule's whole point: a shift smaller than the noise makes no claim."""
+    from predictability_horizon.partb_ablation import summarise
+
+    # A spans 0.90-1.10 (spread 0.20); B's median sits 0.05 away -- inside the noise.
+    s = summarise(_fake_result(
+        a=[0.90, 0.95, 1.00, 1.05, 1.10],
+        b=[0.95, 1.00, 1.05, 1.10, 1.15],
+        c=[0.90, 0.95, 1.00, 1.05, 1.10],
+        d=[0.95, 1.00, 1.05, 1.10, 1.15],
+    ))
+    by_name = {e.name: e for e in s.effects}
+    assert not by_name["integrator"].reportable
+    assert not by_name["data"].reportable
+    assert not s.second_panel
+
+
+def test_effect_above_the_seed_spread_is_reportable_and_earns_a_panel():
+    """A shift several times the spread, and a quarter of the shortfall, gets the panel."""
+    from predictability_horizon.partb_ablation import summarise
+
+    # A spans 0.60-0.64 (spread 0.04), median 0.62; true 1.00 -> shortfall 0.38.
+    # B's median is 0.42 above A -- far outside the spread, and > 0.25 * 0.38.
+    s = summarise(_fake_result(
+        a=[0.60, 0.61, 0.62, 0.63, 0.64],
+        b=[1.02, 1.03, 1.04, 1.05, 1.06],
+        c=[0.60, 0.61, 0.62, 0.63, 0.64],
+        d=[1.02, 1.03, 1.04, 1.05, 1.06],
+    ))
+    by_name = {e.name: e for e in s.effects}
+    assert by_name["integrator"].reportable
+    assert by_name["integrator"].delta == pytest.approx(0.42)
+    assert s.second_panel
+    assert s.shortfall == pytest.approx(0.38)
+
+
+def test_non_additive_effects_are_flagged():
+    """D exists to catch this: two effects that do not sum are not a decomposition."""
+    from predictability_horizon.partb_ablation import summarise
+
+    # integrator +0.20, data +0.20, but D sits +0.80 above A rather than +0.40.
+    s = summarise(_fake_result(
+        a=[0.60, 0.61, 0.62, 0.63, 0.64],
+        b=[0.80, 0.81, 0.82, 0.83, 0.84],
+        c=[0.80, 0.81, 0.82, 0.83, 0.84],
+        d=[1.40, 1.41, 1.42, 1.43, 1.44],
+    ))
+    assert not s.additive
+    assert s.additivity_residual == pytest.approx(0.40)
+
+
+def test_best_mu_is_the_one_closest_to_the_true_exponent():
+    """The sweep reports the penalty's best case, not an arbitrary setting."""
+    from predictability_horizon.partb_ablation import summarise
+
+    s = summarise(_fake_result(
+        a=[0.62] * 5, b=[0.62] * 5, c=[0.62] * 5, d=[0.62] * 5
+    ))
+    assert s.best_mu == 10.0  # medians 3.1 / 2.9 / 2.6 against a true 1.00

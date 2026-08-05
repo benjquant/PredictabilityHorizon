@@ -366,3 +366,125 @@ def run_ablation(
     )
     dump(result, out)
     return result
+
+
+_PANEL_SHARE = 0.25
+"""An effect earns Fig 7's second panel only if it is at least this fraction of the shortfall.
+
+Reportability alone is not enough: with tight spreads a fraction of a percent can clear the
+noise and still not be worth a picture.
+"""
+
+
+@dataclass(frozen=True)
+class Effect:
+    """One attributed cause, with the verdict of the pre-registered rule already applied."""
+
+    name: str
+    delta: float
+    threshold: float
+    reportable: bool
+    share_of_shortfall: float
+
+
+@dataclass(frozen=True)
+class Summary:
+    """The reporting rule of the spec, applied. Fixed before the numbers existed."""
+
+    shortfall: float
+    effects: list[Effect]
+    additivity_residual: float
+    additive: bool
+    second_panel: bool
+    best_mu: float
+
+
+def _effect(result: AblationResult, name: str, cell: str, shortfall: float) -> Effect:
+    delta = result.median(cell) - result.median("A")
+    threshold = max(result.spread("A"), result.spread(cell))
+    share = abs(delta) / abs(shortfall) if shortfall else 0.0
+    return Effect(
+        name=name,
+        delta=delta,
+        threshold=threshold,
+        reportable=abs(delta) > threshold,
+        share_of_shortfall=share,
+    )
+
+
+def summarise(result: AblationResult, mus: Sequence[float] = _MUS) -> Summary:
+    """Apply the spec's reporting rule.
+
+    An effect is REPORTABLE iff the shift in medians exceeds the full min-max seed range of
+    BOTH cells involved -- below that it is not separable from training noise and makes no
+    claim. Fig 7's second panel exists iff some reportable effect is also at least
+    _PANEL_SHARE of the total shortfall. Additivity is checked against the same spread: if D
+    does not sit where the two effects predict, they interact and the result is two
+    observations, not a decomposition.
+    """
+    shortfall = result.true_lambda1 - result.median("A")
+    effects = [
+        _effect(result, "integrator", "B", shortfall),
+        _effect(result, "data", "C", shortfall),
+    ]
+    predicted = effects[0].delta + effects[1].delta
+    residual = abs((result.median("D") - result.median("A")) - predicted)
+    additive = residual <= max(result.spread("A"), result.spread("D"))
+    second_panel = any(
+        e.reportable and e.share_of_shortfall >= _PANEL_SHARE for e in effects
+    )
+    best_mu = min(
+        mus, key=lambda mu: abs(result.median(penalty_label(mu)) - result.true_lambda1)
+    )
+    return Summary(
+        shortfall=shortfall,
+        effects=effects,
+        additivity_residual=residual,
+        additive=additive,
+        second_panel=second_panel,
+        best_mu=float(best_mu),
+    )
+
+
+def report_lines(result: AblationResult, summary: Summary) -> list[str]:
+    """Human-readable summary, in the form the ledger entry wants.
+
+    Every lambda_1 carries its window and step size: a bare number is not a result, because
+    the exponent does not converge at these horizons under any integrator.
+    """
+    proto = (
+        f"window {result.window_s:.1f} s, dt = {result.dt:g}, "
+        f"mean over {result.qr_seeds} QR seeds"
+    )
+    lines = [f"Part-B ablation -- all lambda_1 per second, {proto}", ""]
+    for label in ("A", "B", "C", "D", "plain", *(penalty_label(m) for m in _MUS)):
+        v = result.values(label)
+        qr = max(r.qr_spread for r in result.runs if r.label == label)
+        lines.append(
+            f"  {label:<16} median {result.median(label):+.4f}  "
+            f"range [{v[0]:+.4f}, {v[-1]:+.4f}]  train spread {result.spread(label):.4f}  "
+            f"worst QR spread {qr:.4f}"
+        )
+    lines += [
+        "",
+        f"  true             {result.true_lambda1:+.4f}  (QR spread {result.true_qr_spread:.4f})",
+        f"  shortfall (true - A) {summary.shortfall:+.4f}",
+        "",
+    ]
+    for e in summary.effects:
+        verdict = "REPORTABLE" if e.reportable else "below seed spread -- no claim"
+        lines.append(
+            f"  {e.name:<11} delta {e.delta:+.4f}  threshold {e.threshold:.4f}  "
+            f"({e.share_of_shortfall:.0%} of shortfall)  {verdict}"
+        )
+    lines += [
+        "",
+        f"  additivity residual {summary.additivity_residual:.4f} -- "
+        + ("additive" if summary.additive else "NOT additive: report as two observations"),
+        f"  Fig 7 second panel: {'yes' if summary.second_panel else 'no'}",
+        f"  best penalty weight: mu = {summary.best_mu:g}",
+        "",
+        "  Seeds vary training only; dataset seed is 0 throughout, so data-sampling",
+        "  variance is not measured.",
+    ]
+    return lines
