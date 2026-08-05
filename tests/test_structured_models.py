@@ -53,9 +53,18 @@ def test_hnn_spectrum_on_traj_is_canonical():
     assertion below would not catch, since a plain MLP fits pdot perfectly well. The pdot
     relative error is what actually moves under training.
 
+    Since the closed-form Cayley Jacobian landed, ``hnn_spectrum_on_traj`` reads its Jacobians off
+    that formula rather than off autodiff, so this sum now certifies the Cayley ARITHMETIC -- det
+    J = 1 is an algebraic identity for any Hamiltonian A. The executed-map evidence is
+    ``test_hnn_is_near_volume_preserving``, which stays on the autodiff path; see the note in
+    ``structured_models.model_spectrum_sum``.
+
     Measured (120 epochs, seed 0) over the test's 1.8 s window (3600 steps at dt=5e-4, QR seed 0):
-    sum=-7.3e-06, largest=1.4754. The ``abs(sum) < 1e-4`` bound is ~14x that magnitude,
-    tightened from 0.2 now that the step is exactly symplectic rather than symplectic to O(dt^2).
+    sum=-2.346e-05, largest=1.4754. ``largest`` is unchanged to four decimals from the autodiff
+    measurement this replaces (same window, same dt, same QR seed), which is the receipt that
+    routing through the closed form moved no lambda_1; only the sum moved, -7.3e-06 -> -2.346e-05,
+    both being float32 round-off against an identity. The ``abs(sum) < 1e-4`` bound is ~4x the new
+    magnitude, tightened from 0.2 now that the step is exactly symplectic rather than to O(dt^2).
     ``largest > 0.3`` is somewhat discriminating on its own (an untrained network reads ~0.0036
     and would fail it) but is loose: 0.31 and 5.0 both pass it against a true lambda_1 of 1.554
     on this same 1.8 s window (dt=5e-4, QR seed 0). Note: this tripwire's short-window, single-QR
@@ -165,6 +174,64 @@ def test_hnn_trains_directly_on_canonical_data():
     rel_pdot = (torch.norm(pd - pdot_ref) / torch.norm(pdot_ref)).item()
     print(f"HNN pdot relative error = {rel_pdot:.3f}")
     assert rel_pdot < 0.5  # discriminates the double-M(theta) bug (1.078 before, 0.006 after)
+
+
+def test_hnn_cayley_jacobian_matches_autodiff():
+    """The closed form must be the Jacobian of the map that actually ran.
+
+    Autodiff differentiates the executed Picard passes; the Cayley formula describes the exact
+    implicit-midpoint map. An under-converged fixed point is what would separate them, and
+    nothing else detects it. Direct analogue of
+    test_systems.py::test_acrobot_analytic_jacobian_matches_autodiff.
+
+    Measured (torch.manual_seed(0), untrained HNN, this 3-state fixture): max abs diff =
+    1.192e-07 at BOTH dt=5e-4 and dt=5e-3 -- a single float32 ulp on entries of this magnitude,
+    matching the acrobot ground truth's measured range of 3e-11..1.5e-7 (systems/acrobot.py
+    module docstring). The tolerances below are ~10x that measurement.
+    """
+    from predictability_horizon.structured_models import _model_jac_fn, hnn_cayley_jacobians
+
+    torch.manual_seed(0)
+    states = np.array(
+        [[2.5, 0.0, 0.0, 0.0], [1.2, -2.0, 4.0, -3.0], [-0.7, 2.2, -9.0, 7.0]]
+    )
+    for dt, tol in ((5e-4, 1.5e-6), (5e-3, 1.5e-6)):
+        hnn = HNN(dt)
+        hnn.eval()
+        ja = hnn_cayley_jacobians(hnn, torch.tensor(states, dtype=torch.float32))
+        ja_np = ja.detach().numpy().astype(np.float64)
+        jad = np.stack([_model_jac_fn(hnn)(s) for s in states])
+        err = np.abs(ja_np - jad).max()
+        print(f"[cayley vs autodiff dt={dt:g}] max abs diff = {err:.3e}")
+        assert err < tol
+
+
+def test_hnn_cayley_transform_is_algebraically_symplectic():
+    """det J = 1 for the closed form.
+
+    This holds identically for any Hamiltonian A = J4 @ S with symmetric S, so it certifies the
+    Cayley ARITHMETIC, not the model. The physics evidence is
+    test_hnn_is_near_volume_preserving, which reads the determinant off the autodiff Jacobian of
+    the executed map -- this test must never be cited in its place.
+
+    Measured (torch.manual_seed(0), untrained HNN, this 3-state fixture): max |det J - 1| = 0.0
+    at dt=5e-4 and 1.192e-07 at dt=5e-3 -- a single float32 ulp, matching the acrobot ground
+    truth's measured range of 3e-11..1.5e-7. The bound below is ~10x the larger measurement.
+    """
+    from predictability_horizon.structured_models import hnn_cayley_jacobians
+
+    torch.manual_seed(0)
+    states = torch.tensor(
+        [[2.5, 0.0, 0.0, 0.0], [1.2, -2.0, 4.0, -3.0], [-0.7, 2.2, -9.0, 7.0]],
+        dtype=torch.float32,
+    )
+    for dt in (5e-4, 5e-3):
+        hnn = HNN(dt)
+        hnn.eval()
+        det = torch.linalg.det(hnn_cayley_jacobians(hnn, states))
+        err = (det - 1.0).abs().max().item()
+        print(f"[cayley det dt={dt:g}] max |det J - 1| = {err:.3e}")
+        assert err < 1.5e-6
 
 
 def test_hnn_step_solves_the_implicit_midpoint_equation():

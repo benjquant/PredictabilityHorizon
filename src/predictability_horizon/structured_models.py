@@ -12,7 +12,7 @@ import warp as wp
 from torch import nn
 
 from predictability_horizon.core import LyapunovResult
-from predictability_horizon.lyapunov import lyapunov_spectrum
+from predictability_horizon.lyapunov import lyapunov_spectrum, lyapunov_spectrum_from_jacobians
 from predictability_horizon.systems import System
 from predictability_horizon.warpsim import rollout
 from predictability_horizon.worldmodel import MLP, Dataset
@@ -26,6 +26,11 @@ tests. FIXED rather than residual-triggered -- a state-dependent trip count woul
 piecewise-defined and its Jacobian discontinuous across the switching surfaces, and this module
 measures Jacobian-derived observables (lambda_1, det J).
 """
+
+_J4 = torch.tensor(
+    [[0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0], [-1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0]]
+)
+"""Canonical structure matrix: _J4 @ grad H = (dH/dp, -dH/dq). Mirrors systems/acrobot.py."""
 
 
 def _logdet_jac(model: nn.Module, x: torch.Tensor) -> torch.Tensor:
@@ -85,6 +90,45 @@ def _model_jac_fn(
     return jac_fn
 
 
+def _hnn_midpoint(hnn: HNN, states: torch.Tensor) -> torch.Tensor:
+    """(N,4) states -> (N,4) converged implicit-midpoint points zbar, detached.
+
+    The same _N_FP_ITER Picard passes HNN.forward runs, with the graph thrown away: the Cayley
+    transform needs only the LOCATION of zbar, because differentiating
+    z' = z + dt J grad H(zbar) with zbar = (z + z')/2 already accounts analytically for zbar's
+    dependence on z.
+    """
+    zb = states
+    for _ in range(_N_FP_ITER):
+        q = zb[..., :2].detach().requires_grad_(True)
+        p = zb[..., 2:].detach().requires_grad_(True)
+        qd, pd = hnn.vector_field(q, p)
+        zb = states + 0.5 * hnn.dt * torch.cat([qd, pd], dim=-1).detach()
+    return zb.detach()
+
+
+def hnn_cayley_jacobians(hnn: HNN, states: torch.Tensor) -> torch.Tensor:
+    """(N,4) canonical states -> (N,4,4) analytic one-step Jacobians of the HNN's map.
+
+    Differentiating z' = z + dt [J grad H_phi(zbar)] with zbar = (z + z')/2 gives a Cayley
+    transform
+
+        J_step = (I - (dt/2) A)^-1 (I + (dt/2) A),   A = J4 @ Hess H_phi(zbar),
+
+    which is symplectic identically because A is Hamiltonian: det J = 1 to machine precision,
+    not to O(dt^2). H_phi is the LEARNED network and zbar is the midpoint of the MODEL's own
+    step -- the true Hamiltonian appears nowhere in this. Batched with torch.func so an orbit
+    costs one call rather than one torch re-entry per state, and pinned to autodiff through the
+    executed Picard passes by test_hnn_cayley_jacobian_matches_autodiff.
+    """
+    zbar = _hnn_midpoint(hnn, states)
+    hess = torch.func.vmap(torch.func.hessian(hnn.hamiltonian))(zbar)
+    a = _J4.to(hess.dtype) @ hess
+    eye = torch.eye(4, dtype=hess.dtype)
+    half = 0.5 * hnn.dt
+    return torch.linalg.solve(eye - half * a, eye + half * a)
+
+
 class HNN(nn.Module):
     """Hamiltonian NN as a canonical (θ,p) one-step map via implicit midpoint.
 
@@ -119,6 +163,14 @@ class HNN(nn.Module):
             dim=-1,
         )
         return self.net(emb).squeeze(-1)
+
+    def hamiltonian(self, z: torch.Tensor) -> torch.Tensor:
+        """H_phi at ONE canonical state z = (q1, q2, p1, p2) -> scalar.
+
+        Single-state and flat so torch.func.hessian composes with vmap over a whole orbit;
+        _hamiltonian keeps the batched (q, p) signature the training loop uses.
+        """
+        return self._hamiltonian(z[:2], z[2:])
 
     def vector_field(self, q: torch.Tensor, p: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         # q, p must already require grad (see the autograd design note). Returns (q̇, ṗ).
@@ -205,15 +257,19 @@ def hnn_spectrum_on_traj(
 ) -> LyapunovResult:
     """HNN Lyapunov spectrum along a true canonical trajectory.
 
-    The HNN is a canonical (q, p) = (theta, p) map and the simulator now emits exactly those
-    coordinates, so the model's Jacobian is evaluated directly on the true orbit -- no change
-    of frame. This is the same apples-to-apples "model Jacobian along the true orbit"
-    convention used for the MLP (model_lyapunov_on_traj).
+    The HNN is a canonical (q, p) = (theta, p) map and the simulator emits exactly those
+    coordinates, so the model's Jacobian is evaluated directly on the true orbit -- no change of
+    frame. This is the same apples-to-apples "model Jacobian along the true orbit" convention
+    used for the MLP (model_lyapunov_on_traj): the model's own derivative, taken at the states
+    the real system visits rather than wherever the model's own drift ended up.
+
+    Uses the closed-form Cayley Jacobian, computed for the whole orbit in one batched call.
     """
     hnn.eval()
-    return lyapunov_spectrum(
-        _model_jac_fn(hnn), np.asarray(true_traj, dtype=np.float64), dt=dt, k=k
-    )
+    traj = np.asarray(true_traj, dtype=np.float64)
+    z = torch.tensor(traj[:-1], dtype=torch.float32)
+    jacs = hnn_cayley_jacobians(hnn, z).detach().numpy().astype(np.float64)
+    return lyapunov_spectrum_from_jacobians(jacs, dt=dt, k=k)
 
 
 def model_spectrum_sum(
@@ -225,11 +281,15 @@ def model_spectrum_sum(
     rollout) — avoids model-drift artifacts, matching the Part-B audit's apples-to-apples
     convention. All models now live in canonical (θ,p), so this is directly comparable across
     the plain MLP, the volume-penalty MLP and the HNN. For a meaningful λ₁ (not just the
-    volume sum) on the HNN, use ``hnn_spectrum_on_traj``; the volume *sum* still reads ≈0 here
-    for an HNN only because its implicit-midpoint map has det J = 1 EXACTLY — symplectic for
-    any Hamiltonian, not to O(dt²) — ANYWHERE in (θ,p) space, on an untrained network exactly
-    as on a trained one -- a near-zero sum is architecture-guaranteed, not evidence about
-    training or fit quality.
+    volume sum) on the HNN, use ``hnn_spectrum_on_traj``.
+
+    Deliberately uses the AUTODIFF Jacobian (_model_jac_fn) for every model, the HNN included,
+    rather than the HNN's closed-form Cayley Jacobian. Autodiff differentiates the code that
+    actually ran, which is what makes a near-zero sum evidence about the executed map; the
+    Cayley determinant is an algebraic identity for any Hamiltonian A and would certify the
+    arithmetic instead. Same distinction as test_acrobot_is_symplectic_under_autodiff versus
+    test_cayley_transform_is_algebraically_symplectic. Note the sum is still
+    architecture-guaranteed and reads the same on an untrained network as on a trained one.
     """
     model.eval()
     true_traj = rollout(
