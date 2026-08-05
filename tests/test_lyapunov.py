@@ -2,7 +2,10 @@ import numpy as np
 import pytest
 
 from predictability_horizon.calib_systems import harmonic_map, lorenz_jacobian_fd, lorenz_rk4_map
-from predictability_horizon.lyapunov import lyapunov_spectrum
+from predictability_horizon.lyapunov import (
+    lyapunov_spectrum,
+    lyapunov_spectrum_from_jacobians,
+)
 
 
 @pytest.mark.calibration
@@ -51,3 +54,26 @@ def test_lorenz_largest_exponent_matches_literature():
     assert abs(mean_largest - 0.9056) < 0.05
     # sharp: every spectrum sums to the exact, constant flow divergence
     assert np.allclose(spectrum_sums, -(10.0 + 1.0 + 8.0 / 3.0), atol=1e-3)
+
+
+def test_batched_entry_point_matches_the_callback_one():
+    """The two estimators must be the same estimator.
+
+    lyapunov_spectrum_from_jacobians exists only so callers that can produce every Jacobian in
+    one batched pass (the HNN's Cayley transform under torch.func.vmap) need not re-enter torch
+    once per state. It is a second implementation of a load-bearing calculation, so it is pinned
+    to the original rather than trusted.
+    """
+    rng = np.random.default_rng(0)
+    dim, steps, dt = 4, 300, 5e-4
+    # A random-but-fixed stack of well-conditioned Jacobians; the states are irrelevant to the
+    # callback version beyond selecting which Jacobian comes back, so index by position.
+    jacs = np.eye(dim) + 0.02 * rng.standard_normal((steps, dim, dim))
+    traj = np.arange(steps + 1, dtype=float).reshape(-1, 1) * np.ones((1, dim))
+
+    def jac_fn(state):
+        return jacs[int(state[0])]
+
+    a = lyapunov_spectrum(jac_fn, traj, dt=dt, k=dim, seed=0)
+    b = lyapunov_spectrum_from_jacobians(jacs, dt=dt, k=dim, seed=0)
+    assert np.allclose(a.exponents, b.exponents, rtol=0, atol=1e-12)
