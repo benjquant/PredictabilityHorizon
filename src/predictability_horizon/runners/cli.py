@@ -56,3 +56,18 @@ def reproduce(out: str) -> None:
     ]:
         p = fn(out=d / name)
         click.echo(f"wrote {p}")
+
+
+@main.command()
+@click.option("--out", default="writeup/figures/partb_ablation.json", type=click.Path())
+def ablation(out: str) -> None:
+    """Run the Part-B four-corner ablation and the penalty sweep (~4 h on CPU)."""
+    from predictability_horizon.partb_ablation import (  # type: ignore[attr-defined]
+        report_lines,
+        run_ablation,
+        summarise,
+    )
+
+    result = run_ablation(Path(out))
+    for line in report_lines(result, summarise(result)):
+        click.echo(line)

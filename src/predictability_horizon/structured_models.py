@@ -77,10 +77,15 @@ def train_volume_penalty_mlp(
     return model
 
 
-def _model_jac_fn(
+def model_jac_fn(
     model: nn.Module,
 ) -> Callable[[npt.NDArray[np.float64]], npt.NDArray[np.float64]]:
-    """Returns jac_fn(state)->(dim,dim) using the model's torch autograd Jacobian."""
+    """Returns jac_fn(state)->(dim,dim) using the model's torch autograd Jacobian.
+
+    The general path, used for any model without a closed-form Jacobian -- both MLPs, and the
+    HNN when the point is to differentiate the code that actually ran (model_spectrum_sum,
+    and the oracle test for hnn_cayley_jacobians).
+    """
 
     def jac_fn(s: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
         st = torch.tensor(s, dtype=torch.float32)
@@ -294,7 +299,7 @@ def model_spectrum_sum(
     the plain MLP, the volume-penalty MLP and the HNN. For a meaningful λ₁ (not just the
     volume sum) on the HNN, use ``hnn_spectrum_on_traj``.
 
-    Deliberately uses the AUTODIFF Jacobian (_model_jac_fn) for every model, the HNN included,
+    Deliberately uses the AUTODIFF Jacobian (model_jac_fn) for every model, the HNN included,
     rather than the HNN's closed-form Cayley Jacobian. Autodiff differentiates the code that
     actually ran, which is what makes a near-zero sum evidence about the executed map; the
     Cayley determinant is an algebraic identity for any Hamiltonian A and would certify the
@@ -312,6 +317,6 @@ def model_spectrum_sum(
         t_steps,
     )
     spec = lyapunov_spectrum(
-        _model_jac_fn(model), true_traj[t_steps // 10 :], dt=sys.suggested_dt, k=sys.dim
+        model_jac_fn(model), true_traj[t_steps // 10 :], dt=sys.suggested_dt, k=sys.dim
     )
     return float(np.sum(spec.exponents))

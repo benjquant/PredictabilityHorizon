@@ -193,7 +193,7 @@ def test_hnn_cayley_jacobian_matches_autodiff():
     matching the acrobot ground truth's measured range of 3e-11..1.5e-7 (systems/acrobot.py
     module docstring). The tolerances below are ~10x that measurement.
     """
-    from predictability_horizon.structured_models import _model_jac_fn, hnn_cayley_jacobians
+    from predictability_horizon.structured_models import hnn_cayley_jacobians, model_jac_fn
 
     torch.manual_seed(0)
     states = np.array(
@@ -204,7 +204,7 @@ def test_hnn_cayley_jacobian_matches_autodiff():
         hnn.eval()
         ja = hnn_cayley_jacobians(hnn, torch.tensor(states, dtype=torch.float32))
         ja_np = ja.detach().numpy().astype(np.float64)
-        jad = np.stack([_model_jac_fn(hnn)(s) for s in states])
+        jad = np.stack([model_jac_fn(hnn)(s) for s in states])
         err = np.abs(ja_np - jad).max()
         print(f"[cayley vs autodiff dt={dt:g}] max abs diff = {err:.3e}")
         assert err < tol

@@ -26,17 +26,28 @@ import numpy as np
 import numpy.typing as npt
 import torch
 import warp as wp
+from torch import nn
 
 from predictability_horizon.lyapunov import lyapunov_spectrum_from_jacobians
-from predictability_horizon.structured_models import HNN, hnn_cayley_jacobians, train_hnn
-from predictability_horizon.systems import System
+from predictability_horizon.structured_models import (
+    HNN,
+    hnn_cayley_jacobians,
+    model_jac_fn,
+    train_hnn,
+    train_volume_penalty_mlp,
+)
+from predictability_horizon.systems import (
+    SYSTEMS,
+    System,
+    acrobot,  # noqa: F401  (registration)
+)
 from predictability_horizon.systems.acrobot import (
     legacy_acrobot_step,
     to_canonical,
     to_legacy,
 )
 from predictability_horizon.warpsim import rollout
-from predictability_horizon.worldmodel import Dataset, make_dataset
+from predictability_horizon.worldmodel import Dataset, make_dataset, train_world_model
 
 
 def build_legacy_dataset(sys: System, n_traj: int, T: int, seed: int = 0) -> Dataset:  # noqa: N803
@@ -234,3 +245,124 @@ def run_grid(
                     f"sum={ssum:+.2e}"
                 )
     return runs
+
+
+_MUS = (0.1, 1.0, 10.0)
+"""Soft-penalty weights swept.
+
+One value was never neutral. The coordinate change shrank the data -- momenta are ~5x smaller
+than the velocities they replaced -- so the fit term shrank while the volume term, being
+scale-free, did not: holding mu fixed silently strengthened the penalty. Sweeping reports the
+soft method's negative result against its own best case rather than against one arbitrary
+setting.
+"""
+
+
+def penalty_label(mu: float) -> str:
+    """Run label for one soft-penalty setting. The join key used by ``summarise``."""
+    return f"penalty:mu={mu:g}"
+
+
+def _measure_torch_model(
+    label: str, seed: int, model: nn.Module, true_traj: npt.NDArray[np.float64], dt: float
+) -> Run:
+    """lambda_1 and spectrum sum of a torch model along the true orbit, per-state autograd.
+
+    The MLPs are not integrators of anything, so they have no closed-form Jacobian; this is the
+    same per-state autograd path Part B used before spec 3. The Jacobians are materialised once
+    and handed to _measure_from_jacobians, so the QR-seed sweep costs a numpy loop rather than
+    108000 more torch calls per seed.
+    """
+    model.eval()
+    jac_fn = model_jac_fn(model)
+    traj = np.asarray(true_traj)
+    jacs = np.stack([jac_fn(traj[t]) for t in range(traj.shape[0] - 1)])
+    lam, ssum, qr = _measure_from_jacobians(jacs, dt)
+    return Run(label, seed, lam, ssum, qr)
+
+
+def run_mlp_arms(
+    sys: System,
+    seeds: Sequence[int],
+    true_traj: npt.NDArray[np.float64],
+    n_traj: int = 80,
+    t_data: int = 2000,
+    epochs: int = 120,
+    mus: Sequence[float] = _MUS,
+) -> list[Run]:
+    """The plain MLP and the soft-penalty sweep, on the same fixed orbit as the grid.
+
+    Both spectrum sum and lambda_1 are recorded at every mu, because the penalty has two
+    separable jobs: does it achieve volume preservation, and does achieving it help.
+    """
+    dt = sys.suggested_dt
+    ds = make_dataset(sys, n_traj=n_traj, T=t_data, seed=0)
+    runs: list[Run] = []
+    for seed in seeds:
+        plain = train_world_model(ds, epochs=epochs, seed=seed)
+        runs.append(_measure_torch_model("plain", seed, plain, true_traj, dt))
+        print(f"[mlp] plain seed={seed} lambda1={runs[-1].lambda1:+.4f}")
+        for mu in mus:
+            pen = train_volume_penalty_mlp(ds, epochs=epochs, penalty=mu, seed=seed)
+            runs.append(_measure_torch_model(penalty_label(mu), seed, pen, true_traj, dt))
+            print(
+                f"[mlp] mu={mu:g} seed={seed} lambda1={runs[-1].lambda1:+.4f} "
+                f"sum={runs[-1].spectrum_sum:+.4f}"
+            )
+    return runs
+
+
+_X0 = np.array([2.5, 0.0, 0.0, 0.0])
+_N_STEPS = 109_200
+_TRANSIENT = 1_200
+"""109200 - 1200 = 108000 Jacobians = exactly 54.0 s of averaging at dt = 5e-4.
+
+Do NOT shorten. At the retired 5.4 s window the true lambda_1 spanned 0.260..1.242 across 8 QR
+seeds -- an estimator noise floor an order of magnitude above any effect this study attributes.
+Spread by window: 0.982 at 5.4 s, 0.117 at 18 s, 0.034 at 54 s.
+"""
+_SEEDS = (0, 1, 2, 3, 4)
+_DEFAULT_OUT = Path("writeup/figures/partb_ablation.json")
+
+
+def run_ablation(
+    out: Path = _DEFAULT_OUT, seeds: Sequence[int] = _SEEDS
+) -> AblationResult:
+    """Run the whole study and write it to JSON. Roughly five hours on CPU.
+
+    Protocol, fixed and carried on every number: x0 = (2.5, 0, 0, 0), dt = 5e-4, 109200 steps
+    rolled with the first 1200 dropped -- 54.0 s of averaging after a 0.6 s transient -- and
+    every lambda_1 a mean over _QR_SEEDS QR frames, reported with its spread. The true exponent
+    is measured on exactly the same states, with the simulator's Cayley Jacobian and the same
+    QR treatment, so truth and models are estimated identically.
+    """
+    sys = SYSTEMS["acrobot"]
+    dt = sys.suggested_dt
+    traj = true_orbit(sys, _X0, _N_STEPS, _TRANSIENT)
+
+    true_jacs = np.stack(
+        [
+            cast(
+                npt.NDArray[np.float64],
+                sys.jacobian(traj[t], 0.0, sys.default_params, dt),
+            )
+            for t in range(traj.shape[0] - 1)
+        ]
+    )
+    true_lam, _true_sum, true_qr = _measure_from_jacobians(true_jacs, dt)
+    print(
+        f"[true] lambda1={true_lam:+.4f} (qr spread {true_qr:.4f}) over "
+        f"{(_N_STEPS - _TRANSIENT) * dt:.1f} s at dt={dt:g}, {_QR_SEEDS} QR seeds"
+    )
+    runs = run_grid(sys, seeds, traj) + run_mlp_arms(sys, seeds, traj)
+    result = AblationResult(
+        runs=runs,
+        true_lambda1=float(true_lam),
+        true_qr_spread=float(true_qr),
+        dt=dt,
+        n_steps=_N_STEPS,
+        transient_steps=_TRANSIENT,
+        qr_seeds=_QR_SEEDS,
+    )
+    dump(result, out)
+    return result

@@ -115,3 +115,12 @@ def test_the_two_evaluation_integrators_actually_differ():
     assert gaps[0] > 1e-11  # genuinely different maps, ~44x above the measured float64 gap
     for lo, hi in itertools.pairwise(gaps):
         assert 3.6 < hi / lo < 4.4  # O(dt^2): 4x per doubling of dt
+
+
+def test_penalty_labels_round_trip():
+    """Labels are the join key between the sweep and the reporting rule, so pin their format."""
+    from predictability_horizon.partb_ablation import _MUS, penalty_label
+
+    labels = [penalty_label(mu) for mu in _MUS]
+    assert labels == ["penalty:mu=0.1", "penalty:mu=1", "penalty:mu=10"]
+    assert len(set(labels)) == len(_MUS)
