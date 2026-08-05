@@ -534,3 +534,49 @@ def test_fixed_point_saturates_at_six_passes():
             z6 = _midpoint_np(z, 0.0, params, dt, n_iter=6)[0]
             z8 = _midpoint_np(z, 0.0, params, dt, n_iter=8)[0]
             assert np.linalg.norm(z8 - z6) < eps32 * max(np.linalg.norm(z), 1.0)
+
+
+def test_finite_difference_equals_the_vector_field_at_the_midpoint():
+    """The identity train_hnn's training target rests on.
+
+    Implicit midpoint is DEFINED by (z1 - z0)/dt = J grad H((z0 + z1)/2). train_hnn fits the
+    HNN's vector field to the data's finite differences, so it must evaluate that field at the
+    midpoint; evaluating at the endpoint z0 is a systematic O(dt) bias in the learned grad
+    H_phi. This certifies the premise on the true system, where grad H is known analytically.
+
+    Uses the float64 reference step (_midpoint_np) rather than the float32 Warp kernel: at
+    dt = 5e-4 the kernel's rounding noise in (z1 - z0)/dt is within a factor of five of the
+    O(dt) bias being measured, which would leave the discrimination ambiguous.
+
+    Measured (combined running max over both dt, 400 steps each, z0 = [2.5, 0, 0, 0]):
+    residual at zbar = 5.055e-08, at z0 = 2.285e+00, ratio = 4.5e7 (>> the 100x hard stop).
+    The zbar bound is 1e-6, not machine epsilon: _midpoint_np runs the SAME fixed 6 Picard
+    passes as the production kernel (_N_FP_ITER), and at dt = 5e-3 this trajectory passes
+    through a state (~step 139) where 6 passes haven't fully converged, leaving a ~5e-8
+    residual -- confirmed to be a solver-truncation artifact, not an identity violation, by
+    rerunning with more passes: n_iter=8 -> 8.85e-11, n_iter=10 -> 2.25e-13, plateauing at the
+    float64 floor (~2.6e-13) by n_iter=15. 1e-6 has ~20x margin over the observed floor while
+    staying 7+ orders below the O(dt) endpoint residual, which is the comparison that matters.
+    """
+    from predictability_horizon.systems.acrobot import _grad_hamiltonian, _midpoint_np
+
+    sys = SYSTEMS["acrobot"]
+    params = sys.default_params
+
+    def j_grad(z):
+        g = _grad_hamiltonian(z, params)
+        return np.concatenate([g[2:], -g[:2]])
+
+    worst_mid, worst_start = 0.0, 0.0
+    for dt in (5e-4, 5e-3):
+        z = np.array([2.5, 0.0, 0.0, 0.0])
+        for _ in range(400):
+            z1, zbar = _midpoint_np(z, 0.0, params, dt)
+            assert np.allclose(zbar, 0.5 * (z + z1), atol=1e-12)
+            fd = (z1 - z) / dt
+            worst_mid = max(worst_mid, np.abs(fd - j_grad(zbar)).max())
+            worst_start = max(worst_start, np.abs(fd - j_grad(z)).max())
+            z = z1
+    print(f"[midpoint identity] residual at zbar = {worst_mid:.3e}, at z0 = {worst_start:.3e}")
+    assert worst_mid < 1e-6
+    assert worst_start > 100.0 * worst_mid

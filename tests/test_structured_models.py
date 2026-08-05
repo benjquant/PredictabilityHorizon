@@ -34,8 +34,9 @@ def _pdot_rel_err(hnn, ds, dt: float, n: int = 256) -> float:
     the network has been trained at all."""
     x = torch.tensor(ds.x[:n], dtype=torch.float32)
     y = torch.tensor(ds.y[:n], dtype=torch.float32)
-    q = x[:, :2].detach().requires_grad_(True)
-    p = x[:, 2:].detach().requires_grad_(True)
+    # Evaluated where train_hnn fits: the midpoint of the step, not its start.
+    q = (0.5 * (x[:, :2] + y[:, :2])).detach().requires_grad_(True)
+    p = (0.5 * (x[:, 2:] + y[:, 2:])).detach().requires_grad_(True)
     _, pd = hnn.vector_field(q, p)
     pdot_ref = (y[:, 2:] - x[:, 2:]) / dt
     return (torch.norm(pd - pdot_ref) / torch.norm(pdot_ref)).item()
@@ -56,19 +57,22 @@ def test_hnn_spectrum_on_traj_is_canonical():
     of the executed-map evidence, which is ``test_hnn_is_near_volume_preserving``: that test
     stays on the autodiff path; see the note in ``structured_models.model_spectrum_sum``.
 
-    Measured (120 epochs, seed 0) over the test's 1.8 s window (3600 steps at dt=5e-4, QR seed 0):
-    sum=-2.346e-05, largest=1.4754. ``largest`` is unchanged to four decimals from the autodiff
-    measurement this replaces (same window, same dt, same QR seed), which is the receipt that
-    routing through the closed form moved no lambda_1; only the sum moved, -7.3e-06 -> -2.346e-05,
-    both being float32 round-off against an identity. The ``abs(sum) < 1e-4`` bound is ~4x the new
-    magnitude, tightened from 0.2 now that the step is exactly symplectic rather than to O(dt^2).
-    ``largest > 0.3`` is somewhat discriminating on its own (an untrained network reads ~0.0036
-    and would fail it) but is loose: 0.31 and 5.0 both pass it against a true lambda_1 of 1.554
-    on this same 1.8 s window (dt=5e-4, QR seed 0). Note: this tripwire's short-window, single-QR
-    protocol is a fast test gating and must not be compared to the 54 s, 8-QR-seed averaging
-    protocol the paper reports. The pdot relative-error assertion below is what actually ties this
-    test to the trained model: measured untrained rel err ~1.00 (fails the < 0.5 bound below) vs.
-    trained (120 epochs) 0.0024 -- a ~400x margin.
+    Measured (120 epochs, seed 0) over the test's 1.8 s window (3600 steps at dt=5e-4, QR seed 0),
+    after train_hnn was moved to fit the vector field at the step midpoint rather than the
+    endpoint (see structured_models.train_hnn): sum=-4.468e-05, largest=1.4950. (Before that
+    change: sum=-2.346e-05, largest=1.4754 -- itself unchanged to four decimals from the autodiff
+    measurement it replaced, the receipt that routing through the closed-form Cayley Jacobian
+    moved no lambda_1 on its own; only the midpoint-fit change above moved these numbers, and by
+    more than either prior refactor did.) The ``abs(sum) < 1e-4`` bound is now ~2.2x the measured
+    magnitude (was ~4x), still comfortably tightened from the old bound of 0.2 now that the step
+    is exactly symplectic rather than to O(dt^2). ``largest > 0.3`` is somewhat discriminating on
+    its own (an untrained network reads ~0.0036 and would fail it) but is loose: 0.31 and 5.0 both
+    pass it against a true lambda_1 of 1.554 on this same 1.8 s window (dt=5e-4, QR seed 0). Note:
+    this tripwire's short-window, single-QR protocol is a fast test gating and must not be
+    compared to the 54 s, 8-QR-seed averaging protocol the paper reports -- at short windows the
+    exponent varies by a factor of ~4 across QR-frame seeds alone. The pdot relative-error
+    assertion below is what actually ties this test to the trained model: measured untrained rel
+    err ~1.00 (fails the < 0.5 bound below) vs. trained (120 epochs) 0.0015 -- a ~670x margin.
     """
     from predictability_horizon.structured_models import hnn_spectrum_on_traj, train_hnn
     from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
@@ -94,7 +98,7 @@ def test_hnn_spectrum_on_traj_is_canonical():
 
     rel_pdot = _pdot_rel_err(hnn, ds, s.suggested_dt)
     print(f"HNN pdot relative error = {rel_pdot:.4f}")
-    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0024 (~400x margin)
+    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0015 (~670x margin)
     assert rel_pdot < 0.5
 
 
@@ -111,11 +115,13 @@ def test_hnn_is_near_volume_preserving():
     structure is removed outright, which the pdot assertion below would not catch, since a plain MLP
     fits pdot perfectly well. See the note in ``structured_models.model_spectrum_sum``.
 
-    Measured (200 epochs, seed 0): spectrum_sum=-1.007e-05, against -0.009869 under the retired
-    symplectic-Euler step -- a ~1000x drop, and the reason ``abs(ss) < 1e-4`` (~10x the measured
-    magnitude) replaces the old bound of 0.3. The pdot relative error is what actually moves
-    under training or a coordinate regression: measured untrained ~1.00 (fails the < 0.5 bound
-    below) vs. trained 0.0026 -- a ~190x margin.
+    Measured (200 epochs, seed 0), after train_hnn was moved to fit the vector field at the step
+    midpoint rather than the endpoint (see structured_models.train_hnn): spectrum_sum=-9.878e-06
+    (was -1.007e-05 before that change -- both against -0.009869 under the retired
+    symplectic-Euler step, a ~1000x drop either way), the reason ``abs(ss) < 1e-4`` (~10x the
+    measured magnitude) replaces the old bound of 0.3. The pdot relative error is what actually
+    moves under training or a coordinate regression: measured untrained ~1.00 (fails the < 0.5
+    bound below) vs. trained 0.0018 (was 0.0026) -- a ~560x margin.
     """
     from predictability_horizon.structured_models import model_spectrum_sum, train_hnn
     from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401
@@ -131,7 +137,7 @@ def test_hnn_is_near_volume_preserving():
 
     rel_pdot = _pdot_rel_err(hnn, ds, s.suggested_dt)
     print(f"HNN pdot relative error = {rel_pdot:.4f}")
-    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0026 (~190x margin)
+    # discriminates training: untrained ~1.00 (fails this bound), trained 0.0018 (~560x margin)
     assert rel_pdot < 0.5
 
 

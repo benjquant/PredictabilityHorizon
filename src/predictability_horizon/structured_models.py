@@ -224,6 +224,12 @@ def train_hnn(
     The dataset is already canonical (theta, p) -- the simulator emits conjugate momenta --
     so no omega -> p conversion happens here. Applying M(theta) again would inflate the
     momenta and fit H_phi to data the simulator never produced.
+
+    The field is matched at the midpoint (z0 + z1)/2 rather than at z0, because that is where
+    implicit midpoint's defining identity places it. Applied uniformly to every corner of the
+    spec-3 grid, including the retired-kernel ones -- for data no Hamiltonian generated no
+    target is strictly correct, and holding the procedure fixed is what makes the comparison
+    mean anything.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -236,6 +242,11 @@ def train_hnn(
     q1, p1 = y_t[:, :2], y_t[:, 2:]
     qdot = (q1 - q0) / dt
     pdot = (p1 - p0) / dt
+    # Evaluate the field at the MIDPOINT, not the endpoint: implicit midpoint is defined by
+    # (z1 - z0)/dt = J grad H((z0 + z1)/2), so this is the exact relation the data satisfies.
+    # Fitting at z0 instead is a systematic O(dt) bias in the learned grad H_phi. Certified by
+    # test_systems.py::test_finite_difference_equals_the_vector_field_at_the_midpoint.
+    qm, pm = 0.5 * (q0 + q1), 0.5 * (p0 + p1)
     n = x_t.shape[0]
     rng = np.random.default_rng(seed)
     for _ in range(epochs):
@@ -243,8 +254,8 @@ def train_hnn(
         for start in range(0, n, batch_size):
             idx = torch.from_numpy(perm[start : start + batch_size])
             opt.zero_grad()
-            q = q0[idx].detach().requires_grad_(True)
-            p = p0[idx].detach().requires_grad_(True)
+            q = qm[idx].detach().requires_grad_(True)
+            p = pm[idx].detach().requires_grad_(True)
             qd, pd = model.vector_field(q, p)
             loss = nn.functional.mse_loss(qd, qdot[idx]) + nn.functional.mse_loss(pd, pdot[idx])
             loss.backward()
