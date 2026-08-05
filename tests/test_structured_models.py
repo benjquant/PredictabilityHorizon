@@ -48,16 +48,13 @@ def test_hnn_spectrum_on_traj_is_canonical():
     ``hnn_spectrum_on_traj``'s exponent sum reads near 0 for an HNN because implicit midpoint is
     symplectic for ANY Hamiltonian: det J = 1 identically, at every (theta, p), on a randomly
     initialised network exactly as on a trained one. The sum is therefore an ARCHITECTURE
-    receipt, not evidence about training, data or coordinates. It is kept because it is the only
-    tripwire that fires if the symplectic structure is removed outright -- which the pdot
-    assertion below would not catch, since a plain MLP fits pdot perfectly well. The pdot
-    relative error is what actually moves under training.
+    receipt, not evidence about training, data or coordinates.
 
     Since the closed-form Cayley Jacobian landed, ``hnn_spectrum_on_traj`` reads its Jacobians off
     that formula rather than off autodiff, so this sum now certifies the Cayley ARITHMETIC -- det
-    J = 1 is an algebraic identity for any Hamiltonian A. The executed-map evidence is
-    ``test_hnn_is_near_volume_preserving``, which stays on the autodiff path; see the note in
-    ``structured_models.model_spectrum_sum``.
+    J = 1 is an algebraic identity for any Hamiltonian A. This test must never be cited in place
+    of the executed-map evidence, which is ``test_hnn_is_near_volume_preserving``: that test
+    stays on the autodiff path; see the note in ``structured_models.model_spectrum_sum``.
 
     Measured (120 epochs, seed 0) over the test's 1.8 s window (3600 steps at dt=5e-4, QR seed 0):
     sum=-2.346e-05, largest=1.4754. ``largest`` is unchanged to four decimals from the autodiff
@@ -103,15 +100,16 @@ def test_hnn_spectrum_on_traj_is_canonical():
 
 @pytest.mark.integration
 def test_hnn_is_near_volume_preserving():
-    """Spectrum sum near 0 is architecture-guaranteed; the pdot fit is what certifies training.
+    """The executed-map tripwire for symplectic structure; spectrum sum and pdot both move under training.
 
     ``model_spectrum_sum`` reading near 0 is an ARCHITECTURE property of the HNN: implicit
     midpoint is symplectic for ANY Hamiltonian, so det J = 1 identically, at every (theta, p),
     on a randomly initialised network exactly as on a trained one. The sum is therefore an
     architecture receipt, not evidence about training, data or coordinates -- see the caveat in
-    ``structured_models.model_spectrum_sum``. It is kept because it is the only tripwire that
-    fires if the symplectic structure is removed outright, which the pdot assertion below would
-    not catch, since a plain MLP fits pdot perfectly well.
+    ``structured_models.model_spectrum_sum``. BUT this test's spectrum check stays on the autodiff
+    path (differentiating the executed map), so it IS the only tripwire that fires if the symplectic
+    structure is removed outright, which the pdot assertion below would not catch, since a plain MLP
+    fits pdot perfectly well. See the note in ``structured_models.model_spectrum_sum``.
 
     Measured (200 epochs, seed 0): spectrum_sum=-1.007e-05, against -0.009869 under the retired
     symplectic-Euler step -- a ~1000x drop, and the reason ``abs(ss) < 1e-4`` (~10x the measured
