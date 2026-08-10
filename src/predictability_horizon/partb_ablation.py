@@ -17,7 +17,7 @@ code only: nothing here is imported by the models or the figures.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
@@ -143,6 +143,29 @@ def dump(result: AblationResult, path: Path) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
+_CKPT_SUFFIX = ".partial.jsonl"
+
+
+def _checkpoint_path(out: Path) -> Path:
+    """Sidecar holding completed runs, so an interrupted study resumes instead of restarting."""
+    return out.with_name(out.name + _CKPT_SUFFIX)
+
+
+def _load_checkpoint(path: Path) -> list[Run]:
+    """Runs already completed. Empty when the sidecar is absent."""
+    if not path.exists():
+        return []
+    return [Run(**json.loads(ln)) for ln in path.read_text().splitlines() if ln.strip()]
+
+
+def _append_checkpoint(path: Path, run: Run) -> None:
+    """Append one completed run. Flushed immediately -- the point is surviving a kill."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as fh:
+        fh.write(json.dumps(asdict(run)) + "\n")
+        fh.flush()
+
+
 def _symplectic_euler_jacobians(hnn: HNN, states: torch.Tensor) -> torch.Tensor:
     """(N,4) -> (N,4,4) Jacobians of the RETIRED explicit symplectic-Euler step on H_phi.
 
@@ -215,34 +238,61 @@ def run_grid(
     n_traj: int = 80,
     t_data: int = 2000,
     epochs: int = 200,
+    done: set[tuple[str, int]] | None = None,
+    on_run: Callable[[Run], None] | None = None,
 ) -> list[Run]:
     """Train the HNN on both datasets at each seed and measure each under both integrators.
 
     Seeds vary TRAINING only: both datasets are built once, at dataset seed 0, and shared by
     every run. Data-sampling variance is therefore not measured -- state that beside the
     numbers rather than letting a reader assume otherwise.
+
+    ``done`` and ``on_run`` make the grid resumable. Corners A and B (and C and D) share ONE
+    trained network, so a (retired, seed) block is skipped entirely only when BOTH its labels
+    are already in ``done``; if just one is outstanding, the network is still trained -- there
+    is no way to avoid that, the weights do not survive a restart -- but only the missing label
+    is measured, so a partial checkpoint never gets re-measured against a freshly retrained
+    network under the label that already has a recorded value. Each newly completed ``Run`` is
+    handed to ``on_run`` immediately, before the next one starts.
     """
+    done = done or set()
     dt = sys.suggested_dt
-    datasets = {
-        False: make_dataset(sys, n_traj=n_traj, T=t_data, seed=0),
-        True: build_legacy_dataset(sys, n_traj=n_traj, T=t_data, seed=0),
-    }
+    datasets: dict[bool, Dataset] = {}
+
+    def dataset_for(retired: bool) -> Dataset:
+        if retired not in datasets:
+            datasets[retired] = (
+                build_legacy_dataset(sys, n_traj=n_traj, T=t_data, seed=0)
+                if retired
+                else make_dataset(sys, n_traj=n_traj, T=t_data, seed=0)
+            )
+        return datasets[retired]
+
     z = torch.tensor(np.asarray(true_traj)[:-1], dtype=torch.float32)
     runs: list[Run] = []
     for seed in seeds:
         for retired, mid_label, euler_label in _GRID:
-            hnn = train_hnn(datasets[retired], dt, epochs=epochs, seed=seed)
+            outstanding = [lbl for lbl in (mid_label, euler_label) if (lbl, seed) not in done]
+            if not outstanding:
+                continue
+            hnn = train_hnn(dataset_for(retired), dt, epochs=epochs, seed=seed)
             hnn.eval()
             for label, jac_fn in (
                 (mid_label, hnn_cayley_jacobians),
                 (euler_label, _symplectic_euler_jacobians),
             ):
+                if label not in outstanding:
+                    continue
                 jacs = jac_fn(hnn, z).detach().numpy().astype(np.float64)
                 lam, ssum, qr = _measure_from_jacobians(jacs, dt)
-                runs.append(Run(label, seed, lam, ssum, qr))
+                run = Run(label, seed, lam, ssum, qr)
+                runs.append(run)
+                if on_run is not None:
+                    on_run(run)
                 print(
                     f"[grid] {label} seed={seed} lambda1={lam:+.4f} (qr spread {qr:.4f}) "
-                    f"sum={ssum:+.2e}"
+                    f"sum={ssum:+.2e}",
+                    flush=True,
                 )
     return runs
 
@@ -289,25 +339,51 @@ def run_mlp_arms(
     t_data: int = 2000,
     epochs: int = 120,
     mus: Sequence[float] = _MUS,
+    done: set[tuple[str, int]] | None = None,
+    on_run: Callable[[Run], None] | None = None,
 ) -> list[Run]:
     """The plain MLP and the soft-penalty sweep, on the same fixed orbit as the grid.
 
     Both spectrum sum and lambda_1 are recorded at every mu, because the penalty has two
     separable jobs: does it achieve volume preservation, and does achieving it help.
+
+    ``done`` and ``on_run`` make this arm resumable. Unlike ``run_grid``, every (label, seed)
+    here is its own independent training -- there is no shared network to protect -- so resume
+    skips per (label, seed) directly. Each newly completed ``Run`` is handed to ``on_run``
+    immediately, before the next one starts.
     """
+    done = done or set()
     dt = sys.suggested_dt
-    ds = make_dataset(sys, n_traj=n_traj, T=t_data, seed=0)
+    ds: Dataset | None = None
+
+    def get_ds() -> Dataset:
+        nonlocal ds
+        if ds is None:
+            ds = make_dataset(sys, n_traj=n_traj, T=t_data, seed=0)
+        return ds
+
     runs: list[Run] = []
     for seed in seeds:
-        plain = train_world_model(ds, epochs=epochs, seed=seed)
-        runs.append(_measure_torch_model("plain", seed, plain, true_traj, dt))
-        print(f"[mlp] plain seed={seed} lambda1={runs[-1].lambda1:+.4f}")
+        if ("plain", seed) not in done:
+            plain = train_world_model(get_ds(), epochs=epochs, seed=seed)
+            run = _measure_torch_model("plain", seed, plain, true_traj, dt)
+            runs.append(run)
+            if on_run is not None:
+                on_run(run)
+            print(f"[mlp] plain seed={seed} lambda1={run.lambda1:+.4f}", flush=True)
         for mu in mus:
-            pen = train_volume_penalty_mlp(ds, epochs=epochs, penalty=mu, seed=seed)
-            runs.append(_measure_torch_model(penalty_label(mu), seed, pen, true_traj, dt))
+            label = penalty_label(mu)
+            if (label, seed) in done:
+                continue
+            pen = train_volume_penalty_mlp(get_ds(), epochs=epochs, penalty=mu, seed=seed)
+            run = _measure_torch_model(label, seed, pen, true_traj, dt)
+            runs.append(run)
+            if on_run is not None:
+                on_run(run)
             print(
-                f"[mlp] mu={mu:g} seed={seed} lambda1={runs[-1].lambda1:+.4f} "
-                f"sum={runs[-1].spectrum_sum:+.4f}"
+                f"[mlp] mu={mu:g} seed={seed} lambda1={run.lambda1:+.4f} "
+                f"sum={run.spectrum_sum:+.4f}",
+                flush=True,
             )
     return runs
 
@@ -335,6 +411,11 @@ def run_ablation(
     every lambda_1 a mean over _QR_SEEDS QR frames, reported with its spread. The true exponent
     is measured on exactly the same states, with the simulator's Cayley Jacobian and the same
     QR treatment, so truth and models are estimated identically.
+
+    Interruption-safe: every completed Run is appended to a JSONL sidecar beside ``out``
+    (``_checkpoint_path``) as soon as it finishes. A stop at hour four used to cost all four
+    hours -- twice, with the surviving data scraped out of a console log -- so on restart the
+    already-finished runs are loaded from the sidecar and skipped rather than retrained.
     """
     sys = SYSTEMS["acrobot"]
     dt = sys.suggested_dt
@@ -352,9 +433,24 @@ def run_ablation(
     true_lam, _true_sum, true_qr = _measure_from_jacobians(true_jacs, dt)
     print(
         f"[true] lambda1={true_lam:+.4f} (qr spread {true_qr:.4f}) over "
-        f"{(_N_STEPS - _TRANSIENT) * dt:.1f} s at dt={dt:g}, {_QR_SEEDS} QR seeds"
+        f"{(_N_STEPS - _TRANSIENT) * dt:.1f} s at dt={dt:g}, {_QR_SEEDS} QR seeds",
+        flush=True,
     )
-    runs = run_grid(sys, seeds, traj) + run_mlp_arms(sys, seeds, traj)
+
+    ckpt = _checkpoint_path(out)
+    prior = _load_checkpoint(ckpt)
+    done = {(r.label, r.seed) for r in prior}
+    if prior:
+        print(f"[resume] {len(prior)} runs already complete; skipping them", flush=True)
+
+    def record(run: Run) -> None:
+        _append_checkpoint(ckpt, run)
+
+    runs = (
+        prior
+        + run_grid(sys, seeds, traj, done=done, on_run=record)
+        + run_mlp_arms(sys, seeds, traj, done=done, on_run=record)
+    )
     result = AblationResult(
         runs=runs,
         true_lambda1=float(true_lam),

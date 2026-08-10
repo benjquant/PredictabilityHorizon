@@ -278,3 +278,119 @@ def test_additive_effects_are_reported_as_a_decomposition():
     ))
     assert s.additive
     assert s.additivity_residual == pytest.approx(0.0)
+
+
+def test_run_grid_resumes_from_a_partial_checkpoint(tmp_path, monkeypatch):
+    """A stop mid-study must not cost the runs it already finished.
+
+    Toy scale only -- n_traj=4, t_data=200, epochs=2, a 20-step true orbit -- because what is
+    being pinned is the resume LOGIC, not realistic lambda_1 values. Corners A/B (and C/D) share
+    ONE trained network, which is the case that is easy to get wrong: dropping a single label
+    from ``done`` must still retrain that block (weights do not survive a restart, there is no
+    way around it) but must measure and RETURN ONLY the missing label -- never re-measure the
+    label that already has a recorded value against the freshly retrained net, which would
+    silently corrupt the A/B (or C/D) pairing.
+
+        1. A fresh run with an ``on_run`` callback checkpoints one line per completed Run.
+        2. Resuming with every label already done trains nothing and returns nothing new.
+        3. Resuming with one label of a shared pair missing retrains that one block and returns
+           exactly the missing label.
+    """
+    import predictability_horizon.partb_ablation as pba
+
+    s = SYSTEMS["acrobot"]
+    seeds = (0, 1)
+    traj = pba.true_orbit(s, np.array([2.5, 0.0, 0.0, 0.0]), n_steps=20, transient_steps=0)
+
+    train_calls: list[int] = []
+    real_train_hnn = pba.train_hnn
+
+    def counting_train_hnn(*args, **kwargs):
+        train_calls.append(1)
+        return real_train_hnn(*args, **kwargs)
+
+    monkeypatch.setattr(pba, "train_hnn", counting_train_hnn)
+
+    ckpt = pba._checkpoint_path(tmp_path / "toy_ablation.json")
+
+    def record(run):
+        pba._append_checkpoint(ckpt, run)
+
+    # Phase 1: fresh toy-scale run, checkpointing every completed Run as it finishes.
+    runs = pba.run_grid(s, seeds, traj, n_traj=4, t_data=200, epochs=2, on_run=record)
+    assert {(r.label, r.seed) for r in runs} == {
+        (label, seed) for seed in seeds for label in ("A", "B", "C", "D")
+    }
+    assert len(train_calls) == 4  # two shared-model blocks x two seeds
+
+    logged = pba._load_checkpoint(ckpt)
+    assert len(logged) == len(runs) == 8  # one sidecar line per completed run
+    assert {(r.label, r.seed) for r in logged} == {(r.label, r.seed) for r in runs}
+
+    # Phase 2: fully-done resume must train nothing and produce nothing new.
+    done_full = {(r.label, r.seed) for r in logged}
+    train_calls.clear()
+    resumed = pba.run_grid(s, seeds, traj, n_traj=4, t_data=200, epochs=2, done=done_full)
+    assert resumed == []
+    assert train_calls == []
+
+    # Phase 3: drop one label ("B", seed=0) of a shared pair. The network must be retrained
+    # (A and B share it), but the run returned must be exactly the missing label -- not a
+    # re-measurement of "A", and nothing for seed=1's already-complete blocks.
+    done_partial = done_full - {("B", 0)}
+    train_calls.clear()
+    partial = pba.run_grid(s, seeds, traj, n_traj=4, t_data=200, epochs=2, done=done_partial)
+    assert [(r.label, r.seed) for r in partial] == [("B", 0)]
+    assert len(train_calls) == 1
+
+
+def test_run_mlp_arms_resumes_per_label(tmp_path, monkeypatch):
+    """Unlike the grid, every (label, seed) here is its own training -- resume is per-label.
+
+    Toy scale only. Pins that a fully-done resume trains nothing, and that dropping one
+    (label, seed) brings back exactly that one and nothing else.
+    """
+    import predictability_horizon.partb_ablation as pba
+
+    s = SYSTEMS["acrobot"]
+    seeds = (0, 1)
+    traj = pba.true_orbit(s, np.array([2.5, 0.0, 0.0, 0.0]), n_steps=20, transient_steps=0)
+    mus = (0.1,)
+
+    train_calls: list[str] = []
+    real_plain = pba.train_world_model
+    real_penalty = pba.train_volume_penalty_mlp
+
+    def counting_plain(*args, **kwargs):
+        train_calls.append("plain")
+        return real_plain(*args, **kwargs)
+
+    def counting_penalty(*args, **kwargs):
+        train_calls.append("penalty")
+        return real_penalty(*args, **kwargs)
+
+    monkeypatch.setattr(pba, "train_world_model", counting_plain)
+    monkeypatch.setattr(pba, "train_volume_penalty_mlp", counting_penalty)
+
+    runs = pba.run_mlp_arms(s, seeds, traj, n_traj=4, t_data=200, epochs=2, mus=mus)
+    expected_labels = {"plain", pba.penalty_label(0.1)}
+    assert {(r.label, r.seed) for r in runs} == {
+        (label, seed) for seed in seeds for label in expected_labels
+    }
+    assert len(train_calls) == 4  # 2 independent labels x 2 seeds
+
+    done_full = {(r.label, r.seed) for r in runs}
+    train_calls.clear()
+    resumed = pba.run_mlp_arms(
+        s, seeds, traj, n_traj=4, t_data=200, epochs=2, mus=mus, done=done_full
+    )
+    assert resumed == []
+    assert train_calls == []
+
+    done_partial = done_full - {(pba.penalty_label(0.1), 1)}
+    train_calls.clear()
+    partial = pba.run_mlp_arms(
+        s, seeds, traj, n_traj=4, t_data=200, epochs=2, mus=mus, done=done_partial
+    )
+    assert [(r.label, r.seed) for r in partial] == [(pba.penalty_label(0.1), 1)]
+    assert train_calls == ["penalty"]
