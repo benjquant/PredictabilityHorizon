@@ -45,3 +45,6 @@ Literature/
 *.toc
 
 # writeup/paper.pdf is intentionally tracked (shareable draft artifact)
+
+# Ablation resume sidecar — regenerable, churns every run
+writeup/figures/*.partial.jsonl
