@@ -560,7 +560,7 @@ def report_lines(result: AblationResult, summary: Summary) -> list[str]:
     """Human-readable summary, in the form the ledger entry wants.
 
     Every lambda_1 carries its window and step size: a bare number is not a result, because
-    the exponent does not converge at these horizons under any integrator.
+    finite-window estimates depend on the measurement protocol.
     """
     proto = (
         f"window {result.window_s:.1f} s, dt = {result.dt:g}, "
@@ -590,7 +590,7 @@ def report_lines(result: AblationResult, summary: Summary) -> list[str]:
     lines += [
         "",
         f"  additivity residual {summary.additivity_residual:.4f} -- "
-        + ("additive" if summary.additive else "NOT additive: report as two observations"),
+        + ("within additivity tolerance" if summary.additive else "outside additivity tolerance"),
         f"  Fig 7 second panel: {'yes' if summary.second_panel else 'no'}",
         f"  best penalty weight: mu = {summary.best_mu:g}",
         "",

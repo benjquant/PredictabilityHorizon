@@ -30,8 +30,8 @@ def gradient_law(
     ‖∂x_T/∂x₀‖₂ is the worst-case gain a differentiable simulator applies to an input
     perturbation — exactly the sensitivity reverse-mode AD propagates. It grows as
     e^{λ₁ T}, so its log-slope equals the largest Lyapunov exponent (measured here on
-    the same map via `lyapunov_spectrum`), and analytic simulator gradients are only
-    usable for horizons T ≲ 1/λ₁.
+    the same map via `lyapunov_spectrum`) asymptotically. Finite-window estimates can
+    differ; the growth rate alone does not establish an optimisation cutoff.
     """
     norms = []
     for T in horizons:  # noqa: N806

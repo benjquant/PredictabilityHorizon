@@ -30,8 +30,9 @@ def systems() -> None:
 @main.command()
 @click.option("--out", default="writeup/figures", type=click.Path())
 def reproduce(out: str) -> None:
-    """Regenerate Fig 1-8 (trains the world models, runs the Part-A sweeps + the
-    structure-preserving comparison; ~35 min on CPU)."""
+    """Regenerate Fig 1-8: run the experiments and render Fig 7 from saved data.
+
+    Other figures include model training and long CPU optimisation sweeps."""
     from predictability_horizon.viz import (
         make_fig1_gradient_law,
         make_fig2_trajopt_horizon,

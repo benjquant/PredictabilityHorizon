@@ -38,8 +38,41 @@ def test_fig8_written(tmp_path: Path):
     assert p8.exists() and p8.stat().st_size > 0
 
 
-def test_fig7_written(tmp_path: Path):
+def test_fig7_uses_saved_measurements(tmp_path: Path, monkeypatch):
+    import json
+
+    import numpy as np
+    from matplotlib.axes import Axes
+
     from predictability_horizon.viz import make_fig7_structured_spectrum
 
-    p7 = make_fig7_structured_spectrum(out=tmp_path / "fig7.png", fast=True)
-    assert p7.exists() and p7.stat().st_size > 0
+    source = Path(__file__).resolve().parents[1] / "writeup/figures/partb_ablation.json"
+    data = json.loads(source.read_text())
+    # Deliberately different numbers catch hard-coded results or a training fallback.
+    expected = [[1, 2, 3, 4, 8], [2, 4, 6, 8, 12], [3, 4, 5, 6, 9]]
+    for label, samples in zip(["plain", "penalty:mu=10", "A"], expected, strict=True):
+        for run in data["runs"]:
+            if run["label"] == label:
+                run["lambda1"] = samples[run["seed"]]
+    data["true_lambda1"] = 7.5
+    saved = tmp_path / "study.json"
+    saved.write_text(json.dumps(data))
+    observed = {}
+    bar, axhline = Axes.bar, Axes.axhline
+
+    def capture_bar(self, x, height, **kwargs):
+        observed["medians"] = height
+        observed["whiskers"] = kwargs["yerr"]
+        return bar(self, x, height, **kwargs)
+
+    def capture_reference(self, y, **kwargs):
+        observed["reference"] = y
+        return axhline(self, y, **kwargs)
+
+    monkeypatch.setattr(Axes, "bar", capture_bar)
+    monkeypatch.setattr(Axes, "axhline", capture_reference)
+    p7 = make_fig7_structured_spectrum(tmp_path / "elsewhere/fig7.png", fast=True, results=saved)
+    assert p7.stat().st_size > 0
+    np.testing.assert_allclose(observed["medians"], [3, 6, 5])
+    np.testing.assert_allclose(observed["whiskers"], [[2, 4, 2], [5, 6, 4]])
+    assert observed["reference"] == 7.5

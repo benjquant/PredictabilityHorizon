@@ -13,6 +13,7 @@
 % --- Tables & figures ---
 \usepackage{booktabs}
 \usepackage{graphicx}
+\usepackage{placeins}
 \graphicspath{{figures/}{writeup/figures/}{./}}
 
 % --- Layout ---
@@ -43,7 +44,7 @@
 \title{Lyapunov Exponents as Predictability Diagnostics\\
 for Differentiable Simulators and Learned World Models}
 \author{Benjamin Strittmatter}
-\date{June 2026}
+\date{October 2026 revision}
 
 \begin{document}
 \maketitle
@@ -55,6 +56,16 @@ for Differentiable Simulators and Learned World Models}
 
 \tableofcontents
 \newpage
+\paragraph{Revision status.}
+The current evidence is the corrected-simulator regime sweep
+(Section~\ref{sec:A-regimes}), trajectory optimisation (Section~\ref{sec:A-consequence}),
+and the saved five-seed learned-model study (Section~\ref{sec:B-structure}).
+The acrobot now uses canonical momenta and implicit midpoint integration.
+The other retained plots (source files \texttt{fig1}, \texttt{fig3}, \texttt{fig4},
+\texttt{fig6}, and \texttt{fig8}) are explicitly historical: their acrobot results use the
+retired velocity-state, explicit integrator and do not validate the corrected simulator.
+The Introduction and Abstract remain unfinished.
+
 \section{Introduction}\label{sec:intro}
 % WRITE LAST. Motivation + my technical hook; the two-pillar thesis (differentiable-simulator
 % gradients and learned world models both inherit the Lyapunov predictability bound); related
@@ -127,7 +138,13 @@ with $M_T$ the rollout Jacobian of Eq.~\eqref{eq:rollout-jacobian}. Reverse-mode
 
 This is not a peculiarity of one loss. The three canonical uses of a differentiable simulator all backpropagate through the rollout and so all carry the factor $M_T$: system identification differentiates the trajectory with respect to physical parameters, trajectory optimisation differentiates it with respect to a control sequence, and first-order (analytic) policy gradients differentiate it with respect to policy parameters~\cite{suh2022differentiable,parmas2018pipps}. In each case the gradient inherits whatever $M_T$ does.
 
-What $M_T$ does is set by $\lambda_1$. From the definition of the largest Lyapunov exponent, Eq.~\eqref{eq:lambda1}, the rollout Jacobian stretches a generic vector as $\norm{M_T}\sim e^{\lambda_1 T}$ (up to a subexponential prefactor, all that survives when $\lambda_1=0$; Section~\ref{sec:A-law}), so on a chaotic system ($\lambda_1>0$) the gradient magnitude grows exponentially in the horizon. The useful signal does not grow with it: the exponentially large contributions come from the most sensitive directions and inflate both the gradient and its variance, so beyond $T\sim 1/\lambda_1$ the analytic gradient is dominated by chaotic amplification rather than by the quantity one meant to optimise~\cite{metz2021gradients,parmas2018pipps,suh2022differentiable}. This is the \emph{curse of chaos} for differentiable simulators, and it is the precise statement Part~A measures: the same $1/\lambda_1$ horizon that bounds prediction also bounds the useful length of a differentiable rollout.
+For a generic tangent direction, $\norm{M_T}\sim e^{\lambda_1 T}$ up to
+subexponential factors under the assumptions of Section~\ref{sec:bg-lyapunov}.
+This creates sensitivity to perturbations and can complicate gradient-based
+optimisation~\cite{metz2021gradients,parmas2018pipps,suh2022differentiable}.
+It does not, by itself, prove an optimisation cutoff at $1/\lambda_1$:
+objective, perturbation scale, precision, and optimiser budget matter.
+Part~A tests the growth-rate relation and a finite-budget optimisation comparison separately.
 
 Equation~\eqref{eq:loss-grad} also gives a second, independent handle on $\lambda_1$. By Eq.~\eqref{eq:lambda1}, the growth rate of the gradient gain $\norm{M_T}$ with $T$ is itself a finite-horizon estimate of $\lambda_1$---distinct from the Benettin/QR estimator of Section~\ref{sec:bg-lyapunov}, computed from the same orbit, and expected to agree with it as $T\to\infty$ by Oseledets. Section~\ref{sec:m-consistency} makes this comparison the basis of Part~A.
 
@@ -146,13 +163,18 @@ the sum of kinetic and potential energy, with $M(q)$ the configuration-dependent
 The three systems form a deliberate contrast in $\lambda_1$:
 \begin{itemize}
 \item \textbf{Pendulum} --- a single degree of freedom with separable Hamiltonian $H=\tfrac{1}{2}p^2 + V(\theta)$. A one-degree-of-freedom autonomous Hamiltonian is integrable: energy conservation confines every orbit to a level set of $H$, leaving no room for exponential divergence, so $\lambda_1=0$~\cite{arnold1989mathematical}. This is our ordered baseline.
-\item \textbf{Acrobot} --- a two-link pendulum actuated only at the elbow, the textbook chaotic underactuated system~\cite{spong1995swing}. Its inertia matrix $M(q)$ depends on the configuration, making the Hamiltonian \emph{non-separable}, and its passive dynamics are chaotic, $\lambda_1>0$.
+\item \textbf{Acrobot} --- a two-link pendulum, used here as a model of chaotic underactuated dynamics~\cite{spong1995swing}. Its inertia matrix $M(q)$ depends on the configuration, making the Hamiltonian \emph{non-separable}, and its passive dynamics admit chaotic regimes, $\lambda_1>0$.
 \item \textbf{Hénon--Heiles} --- a unit-mass particle in the smooth two-dimensional potential $V(x,y)=\tfrac{1}{2}(x^2+y^2)+x^2y-\tfrac{1}{3}y^3$, a classical model from galactic dynamics~\cite{henon1964applicability}. Its Hamiltonian is \emph{separable} (constant mass matrix $M=I$), yet for energies approaching the escape value $E=\tfrac{1}{6}$ the motion is strongly chaotic, $\lambda_1>0$. It is a second, mechanistically independent chaotic system---of different origin and structure from the acrobot---included to show the gradient diagnostics track chaos itself, not the mechanical setting. Its phase space is \emph{mixed} (regular tori coexist with a chaotic sea), so we launch orbits in the chaotic sea; $\lambda_1$ is $O(0.1)$, small but genuinely positive.
 \end{itemize}
 
-The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling is both the origin of the acrobot's chaos and the reason it is the demanding case for the structure-preserving integrators and world models of Part~B. Chaos does not require it, however: Hénon--Heiles is separable ($M=I$) yet chaotic, its sensitivity arising from the anharmonic potential rather than a configuration-dependent inertia.
+The separable/non-separable distinction is the structural divide. When $M$ is constant the kinetic term in Eq.~\eqref{eq:hamiltonian} decouples from $q$, and the position and momentum updates can be taken independently; when $M(q)$ varies---as for the acrobot---the two are coupled. That coupling makes the acrobot the demanding case for the structure-preserving integrators and world models of Part~B. Chaos does not require it, however: Hénon--Heiles is separable ($M=I$) yet chaotic, its sensitivity arising from the anharmonic potential rather than a configuration-dependent inertia.
 
-Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume preservation, the integrator must not manufacture or destroy phase-space volume of its own accord. We therefore discretise with semi-implicit (symplectic) Euler. For the three conservative systems whose Lyapunov spectrum we measure this preserves the symplectic structure and keeps the discrete one-step map volume-preserving with $\sum_i\lambda_i=0$~\cite{hairer2006geometric,leimkuhler2004simulating}---exactly for the separable pendulum and Hénon--Heiles ($\det J=1$ to machine precision), and up to $O(dt^2)$ for the non-separable acrobot---whereas a generic explicit scheme (forward Euler, standard Runge--Kutta) injects numerical dissipation or expansion that would bias the very spectrum we are trying to measure. The step kernels are detailed in Section~\ref{sec:m-warp}. The resulting ladder---$\lambda_1=0$ for the pendulum up to $\lambda_1>0$ for the chaotic acrobot and Hénon--Heiles---is the controlled axis along which Part~A sweeps the gradient diagnostics and Part~B contrasts a learned model's recovered exponent against the truth.
+The separable pendulum and Hénon--Heiles use symplectic Euler.
+For the non-separable acrobot we use canonical implicit midpoint, a symplectic
+method when solved exactly~\cite{hairer2006geometric,leimkuhler2004simulating}.
+Our implementation uses six fixed Picard iterations; its finite-precision map is
+checked against the analytic midpoint Jacobian. The retired explicit acrobot
+scheme was not symplectic and is retained only for historical comparisons.
 
 \section{Methods --- what we simulate and how}\label{sec:methods}
 
@@ -160,41 +182,31 @@ Because the consistency checks of Section~\ref{sec:bg-lyapunov} rely on volume p
 % semi-implicit (symplectic) Euler step kernels; rollout stored as a (T+1, dim) tape (never
 % overwriting a cell) so reverse-mode adjoints through the trajectory are correct; CPU, single-thread.
 
-We implement each system of Section~\ref{sec:bg-systems} directly as a Warp~\cite{macklin2022warp}
-compute kernel that advances the state by one \emph{velocity-first semi-implicit (symplectic) Euler} step:
-the angular acceleration is evaluated at the current state, the velocity is updated first, and the
-configuration is then advanced with the \emph{new} velocity,
+We implement the systems directly in Warp~\cite{macklin2022warp}.
+The pendulum state is $(\theta,\omega)$ and Hénon--Heiles uses $(x,y,p_x,p_y)$;
+with their unit masses, a momentum-first symplectic Euler step advances
 \begin{equation}
-\omega_{t+1} = \omega_t + dt\,a(q_t,\omega_t), \qquad
-q_{t+1} = q_t + dt\,\omega_{t+1}.
+p_{t+1}=p_t-dt\,\nabla V(q_t),\qquad q_{t+1}=q_t+dt\,p_{t+1}.
 \label{eq:semi-implicit}
 \end{equation}
-For a single degree of freedom this map is exactly symplectic; for the non-separable acrobot it is
-symplectic to $O(dt^2)$ (Section~\ref{sec:bg-systems}). The accelerations $a$ are the only
-system-specific part:
-\begin{itemize}
-\item \textbf{Pendulum} (state $(\theta,\omega)$): $a = -(g/\ell)\sin\theta$.
-\item \textbf{Acrobot} (state $(\theta_1,\theta_2,\omega_1,\omega_2)$): the angular accelerations
-solve the manipulator equation $M(\theta)\,\dot\omega = F(\theta,\omega)$ with the point-mass
-double-pendulum inertia matrix and passive (Coriolis + gravity) forcing
+The pendulum force is $-g\sin\theta$ and the Hénon--Heiles force is
+$(-(x+2xy),-(y+x^2-y^2))$.
+
+The acrobot instead uses $z=(\theta_1,\theta_2,p_1,p_2)$ with
+$p=M(\theta)\omega$ and
 \begin{equation}
-M(\theta)=\begin{bmatrix} (m_1+m_2)\,l_1^2 & m_2 l_1 l_2 \cos(\theta_1-\theta_2)\\[2pt]
-m_2 l_1 l_2 \cos(\theta_1-\theta_2) & m_2 l_2^2 \end{bmatrix},\quad
-F=\begin{bmatrix} -m_2 l_1 l_2\,\omega_2^2 \sin(\theta_1-\theta_2) - (m_1+m_2)\,g l_1 \sin\theta_1\\[2pt]
-\phantom{-}m_2 l_1 l_2\,\omega_1^2 \sin(\theta_1-\theta_2) - m_2 g l_2 \sin\theta_2 \end{bmatrix}.
+M(\theta)=\begin{bmatrix}(m_1+m_2)l_1^2&m_2l_1l_2\cos(\theta_1-\theta_2)\\
+m_2l_1l_2\cos(\theta_1-\theta_2)&m_2l_2^2\end{bmatrix}.
 \label{eq:acrobot-massmatrix}
 \end{equation}
-The kernel advances Eq.~\eqref{eq:semi-implicit} with $\dot\omega = M(\theta)^{-1}F$ in the closed
-form obtained by inverting the $2\times2$ system; we verified that this closed form reproduces
-$M(\theta)^{-1}F$ to machine precision. Because $M$ depends on $\theta$, the Hamiltonian is
-non-separable, which is the structural feature exploited in Part~B (Section~\ref{sec:partB}).
-\item \textbf{Hénon--Heiles} (state $(x,y,p_x,p_y)$): a unit-mass particle in the smooth potential
-$V(x,y)=\tfrac12(x^2+y^2)+x^2y-\tfrac13 y^3$, so the accelerations are just the force $-\nabla V$,
-namely $\ddot x = -(x+2xy)$ and $\ddot y = -(y+x^2-y^2)$. The mass matrix is the identity, so unlike
-the acrobot the Hamiltonian is \emph{separable} and the semi-implicit step is exactly symplectic
-(Section~\ref{sec:bg-systems}); the chaos here comes from the anharmonic potential, not a
-configuration-dependent inertia.
-\end{itemize}
+Its Hamiltonian is Eq.~\eqref{eq:hamiltonian}, with
+$V=-(m_1+m_2)gl_1\cos\theta_1-m_2gl_2\cos\theta_2$.
+We solve $z_{t+1}=z_t+dt\,\mathbb{J}\nabla H((z_t+z_{t+1})/2)$ by six
+fixed Picard passes, where $\mathbb{J}$ is the canonical structure matrix.
+Control adds a generalised force $u$ to the $p_2$ equation.
+Fixed iteration count keeps the executed map differentiable; symplecticity is
+exact for the implicit solution, with numerical accuracy checked for the executed map.
+Historical acrobot plots used angular velocities and an explicit acceleration update.
 
 Reverse-mode differentiation requires the full trajectory to be available on the backward pass, so
 each rollout is stored as a $(T{+}1)\times\dim$ array, writing one new row per step and never
@@ -230,9 +242,8 @@ dividing the running sums by the elapsed time $N\,dt$ to obtain the exponents in
 (per-unit-time) units, sorted in descending order (the telescoping that makes
 $\frac{1}{N\,dt}\sum_t \ln R^{(t)}_{ii}\to\lambda_i$ exact is spelled out in
 Appendix~\ref{app:qr}). The initial transient is discarded by slicing the trajectory before the average: for the dissipative
-Lorenz calibration this is the relaxation onto the strange attractor (the first $2000$ steps), and for
-every system it is the alignment of the QR frame onto the leading Oseledets directions
-(Section~\ref{sec:m-consistency}). A
+Lorenz calibration this is the relaxation onto the strange attractor (the first $2000$ steps), and this trajectory slicing does not burn in the QR frame, which is initialised afterwards.
+Finite-window QR-frame dependence therefore remains part of the measurement. A
 single such estimator is used for every result in this paper.
 
 We calibrate it against two systems with known answers.
@@ -252,12 +263,13 @@ $\sum_i\lambda_i = -13.667$, matching the constant flow divergence
 $\operatorname{tr} Df = -(\sigma+1+\beta)$ to machine precision (Eq.~\eqref{eq:sum-rule}).
 \end{itemize}
 
-Finally, the per-step Jacobian feeding the estimator is computed analytically for the pendulum and
-Hénon--Heiles and by central finite differences for the acrobot, and each is cross-checked against a
-third, independent route---Warp's reverse-mode autodiff. The analytic pendulum Jacobian agrees with
-autodiff to $1.7\times10^{-9}$, the analytic Hénon--Heiles Jacobian to $1\times10^{-4}$, and the
-central-difference acrobot Jacobian to $2.0\times10^{-5}$, confirming that the tangent dynamics the
-estimator integrates are the ones the simulator actually propagates.
+The pendulum and Hénon--Heiles use analytic one-step Jacobians. The corrected
+acrobot uses the midpoint Cayley Jacobian
+$(I-dt\,A/2)^{-1}(I+dt\,A/2)$, with $A=\mathbb{J}\nabla^2H$ at the
+computed midpoint. Tests cross-check these against Warp autodiff and check the
+acrobot's fixed-point and volume-preservation accuracy in the operating envelope.
+The analytic formula represents the implicit map; agreement with the finite-iteration
+implementation must be verified, rather than assumed.
 
 \subsection{Two estimators of \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:m-consistency}
 % gradient-gain slope (from the growth of ||M_T||) vs the Benettin lambda_1: two distinct finite-T
@@ -283,8 +295,7 @@ $\lambda_1$ are one and the same number---rather than as an exact identity.
 
 \section{Part A --- \texorpdfstring{$\lambda_1$}{lambda1} bounds differentiable-simulator gradients}\label{sec:partA}
 % ||M_T|| ~ e^{lambda_1 T} (one factor); slope = lambda_1 (exact on a linear map; consistent on the
-% chaotic acrobot); regime sweep -> slope tracks lambda_1, corr 0.99 (Fig 5); the horizon T <~ 1/lambda_1
-% demonstrated via the analytic-gradient SNR (Fig 6); acrobot trajectory optimisation, precise vs forgiving (Fig 2).
+% Current regime sweep and fixed-budget optimisation; older SNR results are historical.
 Part~A establishes the first pillar of the thesis: the largest Lyapunov exponent $\lambda_1$ governs
 the gradients a differentiable simulator produces. Section~\ref{sec:bg-jacobian} showed that every
 such gradient carries the rollout-Jacobian factor $M_T$ with $\norm{M_T}\sim e^{\lambda_1 T}$, and
@@ -297,229 +308,150 @@ contrast, whose gradient grows only linearly, never exponentially. Hénon--Heile
 $\lambda_1\approx0.13$ close in magnitude to the pendulum's finite-time floor, is the sharpest test that
 the diagnostics track chaos itself rather than merely a large exponent.
 
-Against this cast we (i) confirm the growth law and that its rate \emph{is} $\lambda_1$, on the pendulum
-and both chaotic systems, and see the two chaotic estimates settle onto positive plateaus while the
-pendulum's decays to zero; (ii) show it holds across the whole integrable--chaotic range, by sweeping
-the acrobot's energy so $\lambda_1$ climbs continuously from near zero, with Hénon--Heiles falling on
-the same line; (iii) turn the growth law into a \emph{usefulness} limit---the gradient predictability
-horizon $T\lesssim 1/\lambda_1$---through the collapse of the analytic-gradient signal-to-noise ratio,
-which pins to $T\lambda_1\!\approx\!1$ for two chaotic systems whose $\lambda_1$ differ tenfold; and (iv) draw the
-consequence for trajectory optimisation through the simulator, where the horizon bounds \emph{precise}
-control on the acrobot but a forgiving swing-up sails through it.
+The current regime sweep tests agreement between the gradient-gain slope and QR
+estimate. The optimisation experiment tests how a precise objective behaves as the
+horizon grows under a fixed budget. Earlier growth-law and gradient-SNR plots are
+retained below as historical context, not current acrobot evidence.
 
 \subsection{The gradient-gain growth law}\label{sec:A-law}
-% integrable -> linear (lambda_1=0); chaotic -> exponential e^{lambda_1 T}; analytic shear argument; Fig 1.
-The rollout-Jacobian factor $\norm{M_T}_2$ that every simulator gradient carries
-(Section~\ref{sec:bg-jacobian}) has a leading exponential form $\norm{M_T}_2\sim e^{\lambda_1 T}$; how
-it grows once that factor degenerates is precisely the integrable--chaotic distinction
-(Fig.~\ref{fig:gradient-law}). On the chaotic acrobot the gain is \emph{exponential}: a log-linear fit
-past the initial transient gives $1.29\,\mathrm{s}^{-1}$, matching the Benettin exponent
-$\lambda_1 = 1.28\,\mathrm{s}^{-1}$ measured independently on the same orbit. Hénon--Heiles behaves
-identically at its own, smaller rate---the fit gives $0.152$ against a same-orbit Benettin
-$\lambda_1=0.158$, a straight exponential over some eight decades of $\norm{M_T}_2$. On the integrable pendulum
-the gain is \emph{linear}, $\norm{M_T}_2 \propto T$ with $\lambda_1 = 0$ exactly---the log--log inset
-shows the unit power law. The gradient gain thus blows up at the Lyapunov rate on chaotic dynamics, and
-grows only \emph{polynomially}, never exponentially, on integrable ones.
+\textbf{Historical evidence.} These two plots retain the earlier velocity-state
+acrobot experiment and its explicit, non-symplectic integrator. The old acrobot
+growth rates ($1.29$ versus $1.28\,\mathrm{s}^{-1}$) and apparent convergence
+are superseded as evidence for the corrected simulator. They illustrate the original
+diagnostic; Section~\ref{sec:A-regimes} supplies the current comparison.
 
-\begin{figure}[t]\centering
-  \includegraphics[width=\linewidth]{fig1.png}
-  \caption{Gradient gain $\norm{\partial x_T/\partial x_0}_2$ versus rollout horizon $T$
-  (semilog), each panel over its own time window. Top-left, integrable pendulum: \emph{linear}
-  growth $\norm{M_T}_2\propto T$ with $\lambda_1=0$ (inset: log--log slope $1$); the quoted finite-time
-  $\lambda_1$ are window artifacts that decay to $0$. Top-right, chaotic acrobot: \emph{exponential}
-  growth, log-slope $1.29\,\mathrm{s}^{-1}$ matching the same-orbit Benettin
-  $\lambda_1=1.28\,\mathrm{s}^{-1}$. Bottom, chaotic Hénon--Heiles: likewise \emph{exponential} at a
-  smaller rate, log-slope $0.152$ against Benettin $0.158$ (dimensionless units). Fits are taken past
-  the initial transient (solid; dashed extrapolation).}
+The measured gain is $\norm{M_T}_2$, so its asymptotic exponential rate is
+$\lambda_1$, not $2\lambda_1$. Squaring the gain doubles that rate.
+Regular anharmonic motion can instead produce polynomial tangent growth; a positive
+finite-window estimate alone does not establish a positive asymptotic exponent.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=1.0\linewidth]{fig1.png}
+  \caption{\textbf{Historical, pre-correction.} Gradient gain versus horizon under the older protocol. The acrobot panel uses the retired velocity-state integrator; its fitted rates do not substantiate the current simulator.}
   \label{fig:gradient-law}
 \end{figure}
 
-The linear law is a property of integrable motion, not an accident of this orbit. Every orbit of the
-pendulum is periodic, and because the period depends on amplitude, neighbouring orbits run at slightly
-different frequencies. A perturbation that shifts the energy therefore moves onto an orbit that drifts
-steadily out of phase, the lag growing \emph{linearly} in time; that growing lag is what $\norm{M_T}_2$
-measures, so $\norm{M_T}_2\propto T$.\footnote{In action--angle coordinates $(I,\varphi)$ the action
-$I$ is conserved and the angle advances as $\varphi_T=\varphi_0+\omega(I)\,T$, so the variational matrix
-is the pure shear $\left(\begin{smallmatrix}1 & 0\\ \omega'(I)\,T & 1\end{smallmatrix}\right)$:
-area-preserving ($\det=1$), top singular value $\sigma_{\max}\sim|\omega'(I)|\,T$, with $\omega=2\pi/P$.}
-The rate is the \emph{non-isochronicity}---the change of period with energy, $P'(E)$---which vanishes
-for an isochronous system such as the harmonic oscillator, whose gain stays bounded. Because the growth
-is only linear, $\lambda_1=\lim_{T\to\infty}T^{-1}\ln\norm{M_T}_2=0$ exactly; a finite-horizon slope
-returns not zero but a small positive number \emph{decaying} with the window as $\ln T/T$
-($0.05$--$0.08\,\mathrm{s}^{-1}$ over $40\,\mathrm{s}$ here)---a finite-time artifact of fitting an
-exponential to a line, not a Lyapunov exponent. This decay-versus-plateau is itself the cleanest chaos
-test: Figure~\ref{fig:lambda-convergence} tracks the running $\lambda_1$ against integration time, and
-it settles onto a positive constant for the two chaotic systems (acrobot $\approx1.2$, Hénon--Heiles
-$\approx0.11$) while sliding steadily toward zero for the pendulum. Hénon--Heiles's small exponent is
-thus a genuine constant, not a slow artifact like the pendulum's floor---a distinction of trend, not of
-magnitude.
-
-\begin{figure}[t]\centering
+\begin{figure}[htbp]\centering
   \includegraphics[width=0.62\linewidth]{fig8.png}
-  \caption{Running finite-time $\lambda_1$ (Benettin) versus integration time. The chaotic acrobot and
-  Hénon--Heiles settle onto positive plateaus; the integrable pendulum decays toward zero as
-  $\ln T/T$. This plateau-versus-decay separates Hénon--Heiles's small but genuine $\lambda_1$ from the
-  pendulum's finite-time floor, independently of magnitude.}
+  \caption{\textbf{Historical, pre-correction.} Running QR estimates under the older protocol. The apparent acrobot plateau belongs to the retired integrator; no corrected convergence claim is made from this plot.}
   \label{fig:lambda-convergence}
 \end{figure}
 
-Two points fix the chaotic case. First, the rate is a \emph{single} factor of $\lambda_1$: we fit
-$\norm{M_T}_2$, which grows as $e^{\lambda_1 T}$, so its log-slope is $\lambda_1$; a squared
-quantity---a squared-loss objective, or the squared separation $\norm{\delta x_T}^2$---would grow as
-$e^{2\lambda_1 T}$ and read $2\lambda_1$. Second, the coincidence of slope and Benettin exponent is the
-\emph{consistency relation} of Section~\ref{sec:m-consistency}, not an identity: the two are exact
-equals only for a constant-Jacobian map, and on a single acrobot orbit they agree only to within the
-finite-time scatter of the exponent (here $\sim\!10\%$). The scatter-controlled statement
-slope~$=\lambda_1$ across the whole integrable--chaotic range is established in
-Section~\ref{sec:A-regimes}.
 
+
+\FloatBarrier
 \subsection{The law holds across regimes}\label{sec:A-regimes}
-% slope tracks Benettin lambda_1 across an acrobot energy sweep + pendulum, corr ~0.99; Fig 5.
-Section~\ref{sec:A-law} fixed the law on two orbits; here we vary the dynamics continuously. We sweep
-the acrobot across initial energies ($\theta_1$ from $0.5$ to $3.0$, with $\lambda_1$ spanning from near
-zero to $\sim\!1.3\,\mathrm{s}^{-1}$, non-monotonically), add the integrable pendulum, and include a second, mechanistically independent
-chaotic system---Hénon--Heiles, swept across its own energies. For each we compare the
-gradient-gain slope against the Benettin $\lambda_1$ (Fig.~\ref{fig:slope-vs-lambda}). The points
-cluster on the line slope $=\lambda_1$: across the integrable-to-chaotic range the two rates correlate
-at $0.99$, with best-fit slope $0.96$ (ideal $1$) and near-zero intercept. The gradient-gain rate is
-thus $\lambda_1$ not merely on a single orbit but as a function of the regime.
+% Current corrected-simulator comparison; Fig 5.
+We sweep six canonical acrobot initial states $(\theta_1,0,0,0)$ with
+$\theta_1\in\{0.5,1,1.5,2,2.5,3\}$, one pendulum state $(2,0)$, and
+Hénon--Heiles chaotic-sea initial conditions at energies $0.11,0.13,0.145,0.16$.
+The existing protocol compares gradient-gain slopes and same-orbit QR estimates
+at horizons $1,2,\ldots,8$ seconds for the acrobot, $10,20,\ldots,80$ seconds
+for the pendulum, and $20,40,\ldots,120$ time units for Hénon--Heiles.
+The corrected acrobot uses $dt=0.0005$ seconds.
+Across these 11 points the correlation is $0.969$, with regression slope $0.986$
+(ideal $1$) and intercept $-0.001$. The acrobot QR estimates span
+$0.080$--$1.161\,\mathrm{s}^{-1}$ non-monotonically with initial energy.
+The result supports approximate agreement across these regimes, with visible
+finite-window deviations; it is not equality at every point.
 
-\begin{figure}[t]\centering
+\begin{figure}[htbp]\centering
   \includegraphics[width=0.72\linewidth]{fig5.png}
-  \caption{Gradient-gain slope versus Benettin $\lambda_1$ across an acrobot energy sweep
-  ($\theta_1=0.5\!\to\!3.0$), the pendulum, and a Hénon--Heiles energy sweep (a second, independent
-  chaotic system; triangles); all cluster on $y=x$ (correlation $0.99$). Units are each system's own
-  inverse time (mechanical systems in $\mathrm{s}^{-1}$, Hénon--Heiles dimensionless), so $y=x$ is the
-  unit-free statement slope $=\lambda_1$. Horizontal bars are finite-time Lyapunov window scatter.}
+  \caption{Current corrected-simulator regime sweep: gradient-gain slope versus
+  same-orbit Benettin $\lambda_1$ for six acrobot states, one pendulum state, and
+  four Hénon--Heiles energies. Correlation $0.969$, regression slope $0.986$.
+  Each system uses its own inverse-time units; $y=x$ expresses equality of the two rates.
+  Horizontal bars show variation across finite-time windows, not confidence intervals.}
   \label{fig:slope-vs-lambda}
 \end{figure}
 
-Crucially the fit is unchanged when a second, mechanistically independent chaotic system is added: the
-Hénon--Heiles orbits (a smooth galactic potential, $\lambda_1$ up to $\sim\!0.15$) fall on the same line
-slope $=\lambda_1$, so the law reflects chaos itself rather than the acrobot's particular mechanics. The horizontal error bars
-report the finite-time scatter of the Benettin estimate over independent windows---an honest depiction
-of finite-time Lyapunov uncertainty, not a confidence interval on the plotted point.
-
+\FloatBarrier
 \subsection{The gradient predictability horizon}\label{sec:A-horizon}
-% analytic-gradient SNR collapses past T*lambda_1 ~ 1; genuine decorrelation; Fig 6.
-The growth law has a sharp operational consequence. Section~\ref{sec:bg-jacobian} argued that because
-$\norm{M_T}$ inflates both a gradient and its variance, beyond $T\sim 1/\lambda_1$ the analytic gradient
-of a differentiable rollout is dominated by chaotic amplification rather than by the objective---the
-\emph{curse of chaos}. We make this quantitative with a signal-to-noise ratio: perturbing the initial
-state over an ensemble of nearby conditions, we compare the mean analytic gradient
-$\nabla_{x_0}\norm{x_T}^2$ to its spread across the ensemble (Fig.~\ref{fig:gradient-horizon}). On the
-acrobot ($\lambda_1=1.23\,\mathrm{s}^{-1}$) the SNR is large well inside the horizon ($\approx\!170$ at
-$T\lambda_1\approx0.3$) and falls by roughly an order of magnitude past $T\lambda_1\approx1$ (to
-$\approx\!20$--$50$): the gradient still has a large magnitude, but its \emph{direction} is no longer
-shared across nearby initial conditions. The decisive point is that this crossover tracks the Lyapunov
-clock, not the rollout length. Hénon--Heiles, whose $\lambda_1$ is an order of magnitude smaller
-($0.13$), collapses at the \emph{same} place on its own Lyapunov axis---from $\approx\!190$ to below
-$1$ through $T\lambda_1\approx1$. Two systems that differ tenfold in $\lambda_1$ thus lose gradient
-usability at the same $T\lambda_1$: the usable-gradient horizon is $T\sim1/\lambda_1$, up to a
-logarithmic factor $\sim\log(1/\varepsilon)/(\lambda_1\,dt)$ set by the perturbation scale $\varepsilon$.
+\textbf{Historical evidence.} The earlier experiment compared the mean analytic
+gradient of $\norm{x_T}^2$ to its variation across nearby initial conditions.
+Its acrobot curve used the retired velocity-state integrator. The reported crossover
+near one Lyapunov time has not been re-established under the corrected simulator.
+Gradient SNR across an ensemble and deterministic trajectory optimisation are different
+questions: the former depends on the perturbation ensemble, the latter on objective,
+precision and optimiser budget. The current optimisation comparison follows below.
 
-\begin{figure}[t]\centering
+\begin{figure}[htbp]\centering
   \includegraphics[width=0.75\linewidth]{fig6.png}
-  \caption{Analytic-gradient SNR versus Lyapunov time $T\lambda_1$ for two chaotic systems whose
-  $\lambda_1$ differ tenfold (acrobot $1.23\,\mathrm{s}^{-1}$, Hénon--Heiles $0.13$), each on its own
-  $\lambda_1$. Both collapse at the same $T\lambda_1\approx1$ (dashed): the gradient's direction
-  decorrelates across nearby initial conditions even as its magnitude keeps growing, so the
-  usable-gradient horizon is $1/\lambda_1$---set by the Lyapunov clock, not the rollout length.}
+  \caption{\textbf{Historical, pre-correction.} Gradient SNR across perturbed initial states under the older protocol. The acrobot curve uses the retired velocity-state integrator. This plot is not current evidence for a universal optimisation cutoff at one Lyapunov time.}
   \label{fig:gradient-horizon}
 \end{figure}
 
-This collapse is genuinely nonlinear, not a normalisation artifact. Each ensemble gradient has
-magnitude $\sim\norm{M_T}\sim e^{\lambda_1 T}$, so the ensemble variance grows as $e^{2\lambda_1 T}$;
-on a purely linear (isochronous) map this common growth cancels between the mean (signal) and the
-spread (noise) and the SNR stays flat. The observed decline therefore measures real loss of
-\emph{directional} agreement among neighbouring trajectories: past $T\sim1/\lambda_1$ the analytic
-gradient points a different way for every nearby start, which is exactly what makes long differentiable
-rollouts unusable for first-order optimisation. Decorrelation by itself is not unique to chaos---even an
-integrable but \emph{anharmonic} system loses coherence eventually, as neighbouring orbits at slightly
-different frequencies dephase---but that runs on the non-isochronicity clock $\sim1/(\omega'\varepsilon)$,
-which recedes without bound as the ensemble tightens. What is chaos-specific is that the collapse is
-pinned to the Lyapunov clock at $T\lambda_1\sim1$: a horizon a practitioner cannot escape by shrinking
-$\varepsilon$.
 
+
+\FloatBarrier
 \subsection{Consequence: optimisation through the simulator}\label{sec:A-consequence}
-% acrobot trajectory optimisation: precise reach hits the log-factor wall, forgiving swing-up does not; Fig 2.
-Sections~\ref{sec:A-law}--\ref{sec:A-horizon} measured how far a differentiable rollout's gradient
-stays usable; here we draw the consequence for optimisation, and reach a statement sharper than
-``the gradient works inside the horizon and fails outside it''. On the chaotic acrobot we optimise an
-open-loop elbow torque by gradient descent through the differentiable Warp rollout (Adam), and track
-each objective's \emph{normalized final cost}---the achieved cost as a fraction of the do-nothing
-baseline---as the rollout horizon grows (Fig.~\ref{fig:trajopt}); the integrable pendulum is the null
-control.
+We compare two objectives on the corrected canonical acrobot: reaching a specific
+feasible terminal state and moving both links upright. An integrable pendulum
+provides a precise-reaching control. The acrobot input is a generalised force on
+$p_2$. Each precise target is generated by a known random control sequence, so a
+zero-error solution exists, but a finite-budget optimiser need not find it.
 
-The gradient of a single deterministic rollout is \emph{exact}, so optimisation succeeds well beyond
-the naive Lyapunov time. A \emph{forgiving} objective---swing the hand to upright, satisfied by a large
-basin of control sequences---succeeds at every horizon we tried; and a \emph{precise} objective---reach
-a specific feasible terminal state $x_T^\star$ (one a known control attains, so a zero-cost solution
-provably exists)---succeeds out to several Lyapunov times. The horizon does not simply forbid
-optimisation past $1/\lambda_1$.
+The existing protocol uses $dt=0.0005$ seconds, canonical acrobot start
+$(2.5,0,0,0)$ and pendulum start $(2,0)$, with matched step counts on the
+acrobot's Lyapunov axis. Its passive QR estimate is measured over 7 seconds after
+slicing off the first second of an 8-second rollout, with $k=4$ and QR seed 0.
+It is a different finite-window reference from the 54-second study in Part~B.
+At each of $T\lambda_1=1,2,3,3.5,4,4.5,5$, Adam runs for 250 iterations:
+12 acrobot reach targets, six pendulum targets, and six swing-up initialisations.
+Learning rates are 0.3 for reaching and 1.0 for swing-up. Reach controls start at
+zero; swing-up starts from seeded Gaussian controls (standard deviation 0.3).
+The swing-up loss adds $10^{-7}\sum_t u_t^2$ to the terminal angle cost;
+the plotted cost excludes this regulariser. It requires neither balancing nor
+small terminal velocities. Cost is normalised by the
+corresponding zero-control rollout; the curve is a geometric mean and the band
+is the 10th--90th percentile across seeds.
 
-The precise objective nonetheless hits a sharp wall. Section~\ref{sec:A-horizon} placed the bare
-gradient signal-to-noise crossover at $T\lambda_1\sim1$; the trajectory-optimisation wall sits further
-out, at that crossover \emph{times the logarithmic factor in the achievable precision}---the
-predictability time $\lambda_1^{-1}\log(1/\varepsilon)$ of Section~\ref{sec:bg-lyapunov}, here
-$T\lambda_1\approx4.6$. Past it the precise-reach cost rises \emph{through} the do-nothing baseline: the optimiser ends worse than zero control, its
-squared-error gradient inheriting the $e^{2\lambda_1 T}$ rollout gain until the descent diverges (to
-$\sim\!300\times$ baseline by $T\lambda_1=5$). The wall is genuinely chaotic---the integrable pendulum,
-optimised over identical horizons and step counts, stays orders of magnitude below the baseline
-throughout, as does the forgiving swing-up on the same chaotic acrobot. It is specific both to chaos
-and to objectives that demand precision.
+The measured reference is $\lambda_1=1.00656\,\mathrm{s}^{-1}$.
+Acrobot reaching is non-monotonic below the long-horizon deterioration:
+its geometric-mean cost ratio is $0.00018$ at $T\lambda_1=1$,
+$0.0187$ at $2$, $0.000052$ at $3$, and $0.0497$ at $3.5$.
+It then rises above the zero-control baseline to $4.97$ at $4$,
+$51.5$ at $4.5$, and $44.7$ at $5$.
+The widening spread across targets matters: the 10th--90th percentile range
+at $4$ is approximately $0.18$--$420$. A mean curve does not imply that all
+targets fail at the same horizon.
+The pendulum reaching means remain between $2.7\times10^{-9}$ and
+$3.7\times10^{-8}$ of baseline across the seven horizons. Swing-up means range
+from $9.8\times10^{-7}$ to $0.054$, also below baseline throughout, although
+individual starts can finish poorly. The aggregate contrast supports an objective-
+and budget-dependent precision loss on this chaotic trajectory.
 
-\begin{figure}[t]\centering
-  \includegraphics[width=0.72\linewidth]{fig2.png}
-  \caption{Optimisation through the differentiable simulator on the chaotic acrobot versus rollout
-  horizon $T\lambda_1$. Normalized final cost (achieved cost / do-nothing baseline; geometric mean over
-  reach targets, shaded $10$--$90\%$ band). A \emph{forgiving} objective (swing the hand up; green) and
-  the \emph{integrable} pendulum's \emph{precise} target-reaching (blue) stay orders of magnitude below
-  the do-nothing baseline (dotted) at every horizon, while the chaotic acrobot's \emph{precise}
-  target-reaching (red) rises through the baseline near the predictability horizon $T\lambda_1\approx4.6$
-  ($1/\lambda_1$ up to the logarithmic factor of Section~\ref{sec:A-horizon}) and blows up beyond it as
-  the $e^{2\lambda_1 T}$ gradient gain makes the descent diverge; the widening red band marks the loss
-  of reliability. The horizon bounds \emph{precise} differentiable-sim control; forgiving objectives
-  and integrable dynamics show no wall. The acrobot $\lambda_1\approx1.28$ matches the
-  Benettin $\lambda_1$ of Section~\ref{sec:A-law}.}
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.85\linewidth]{fig2.png}
+  \caption{Current corrected-simulator comparison under a fixed 250-iteration
+  Adam budget: normalised terminal cost versus horizon on the acrobot's
+  Lyapunov axis. Geometric means with 10th--90th percentile bands, across
+  12 acrobot reach targets, six pendulum targets, and six swing-up starts.
+  The dotted line is the zero-control baseline; lower is better.
+  Each objective uses its own baseline.}
   \label{fig:trajopt}
 \end{figure}
 
-The consequence is a refined curse of chaos for differentiable
-simulation~\cite{suh2022differentiable}. The predictability horizon---with its logarithmic
-factor---bounds \emph{precise} control through a differentiable simulator: when the objective pins a
-specific terminal state, the chaotically amplified gradient can no longer deliver it past
-$T\sim\log(1/\varepsilon)/\lambda_1$ in the target precision $\varepsilon$. It does not bound
-differentiable-sim optimisation in general---an exact
-single-trajectory gradient solves a forgiving objective at any horizon, and an integrable system has no
-wall. This is the operational face of the signal-to-noise collapse of Section~\ref{sec:A-horizon},
-whose squared-norm objective is itself a precise one; the wall here is for open-loop single-shooting,
-and multiple shooting over sub-horizon segments would push it out.
+This measures an observed loss of precision under one optimisation protocol,
+not an impossibility boundary. The perturbation-growth estimate
+$T\sim\lambda_1^{-1}\log(1/\varepsilon)$ motivates a precision-dependent horizon,
+but this experiment does not fit that law or isolate sensitivity from optimisation
+budget and conditioning. In particular, a deterministic rollout gradient may remain
+useful beyond one Lyapunov time. The historical SNR experiment concerns an ensemble
+of perturbed starts and cannot substitute for this optimisation measurement.
 
+\FloatBarrier
 \section{Part B --- Lyapunov fidelity of learned world models}\label{sec:partB}
-% MLP world model; prediction-error growth (Fig 3, qualitative); learned vs true lambda_1 (Fig 4:
-% reproduces the integrable exponent, over-amplifies the chaotic one); mechanism (next-step MSE does
-% not constrain the Jacobian / breaks volume preservation); structure-preserving sequel (Fig 7):
-% plain MLP / volume-penalty MLP / symplectic HNN -- only the hard constraint recovers lambda_1.
-
-Part~A established that the largest Lyapunov exponent $\lambda_1$ governs the gradients a
-differentiable simulator produces when the physics is correct. Part~B asks the dual question for a
-model that is \emph{learned} rather than given: does a world model trained only to predict the next
-state inherit the right $\lambda_1$? This is the spine of the section. A multilayer perceptron fit by
-next-step regression reproduces the integrable exponent but \emph{over-amplifies} the chaotic
-one---because next-step accuracy never constrains the Jacobian that carries $\lambda_1$---and only a
-model built with the right \emph{hard} structural constraint, symplectic and volume-preserving,
-recovers it.
-
-We reuse the cast of Part~A: the integrable \emph{pendulum} as the null contrast and the chaotic
-\emph{acrobot} as the workhorse.
-The argument runs in four steps: the learned model and how fast its rollout drifts from the truth
-(Section~\ref{sec:B-model}); the learned-versus-true $\lambda_1$ that its Jacobian implies
-(Section~\ref{sec:B-lyap}); why next-step training is blind to $\lambda_1$ in the first place
-(Section~\ref{sec:B-mechanism}); and which structural constraint repairs it
-(Section~\ref{sec:B-structure}).
+Part~B asks whether a next-step predictor also reproduces the simulator's sensitivity.
+The historical single-seed comparisons below motivated this question.
+The current evidence is the five-training-seed study in Section~\ref{sec:B-structure}:
+the HNN's measured sensitivity varies less across seeds, but the selected penalty MLP
+has a slightly closer median. Neither exact sensitivity recovery nor a universally
+necessary hard constraint follows from these measurements.
 
 \subsection{The learned world model and its prediction drift}\label{sec:B-model}
+
+\textbf{Historical protocol.} This subsection reports the earlier single-seed experiment, including the retired velocity-state acrobot integrator. Its acrobot numbers are superseded by Section~\ref{sec:B-structure}; they do not describe the corrected simulator.
 
 A world model replaces the simulator's one-step map $x_{t+1}=F(x_t)$ with a learned surrogate
 $g_\phi$, fit so that iterating it reproduces trajectories of the true system. We deliberately use the
@@ -545,9 +477,9 @@ rate cannot be read as $\lambda_1$. Figure~\ref{fig:error-growth} is therefore a
 statement---prediction degrades faster on chaotic dynamics---and isolating the exponent the model has
 actually learned requires probing its Jacobian directly, the subject of Section~\ref{sec:B-lyap}.
 
-\begin{figure}[t]\centering
+\begin{figure}[htbp]\centering
   \includegraphics[width=0.75\linewidth]{fig3.png}
-  \caption{Residual-MLP world-model prediction error $\norm{\hat x_t - x_t}$ versus physical time
+  \caption{\textbf{Historical, pre-correction.} The acrobot uses the retired velocity-state integrator. Residual-MLP world-model prediction error $\norm{\hat x_t - x_t}$ versus physical time
   (semilog). Error grows on both systems but faster on the chaotic acrobot (effective log-slope
   $1.74\,\mathrm{s}^{-1}$) than on the integrable pendulum ($0.96\,\mathrm{s}^{-1}$). These are
   model-fidelity rates, not $\lambda_1$: the pendulum's is far from its true $\lambda_1\approx0$. The
@@ -556,6 +488,8 @@ actually learned requires probing its Jacobian directly, the subject of Section~
 \end{figure}
 
 \subsection{Learned versus true \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:B-lyap}
+
+\textbf{Historical protocol.} This subsection reports the earlier single-seed experiment, including the retired velocity-state acrobot integrator. Its acrobot numbers are superseded by Section~\ref{sec:B-structure}; they do not describe the corrected simulator.
 
 To read off the exponent the model has learned, we apply the \emph{same} Benettin/QR estimator used for
 the true systems (Section~\ref{sec:m-lyapunov}) to the model's one-step Jacobian
@@ -582,9 +516,9 @@ $\lambda_1$ is a property the training objective never sees, and on chaotic dyna
 overstates it threefold. Section~\ref{sec:B-mechanism} explains why next-step regression is blind to
 it.
 
-\begin{figure}[t]\centering
+\begin{figure}[htbp]\centering
   \includegraphics[width=0.6\linewidth]{fig4.png}
-  \caption{Learned versus true $\lambda_1$, both from the same Benettin/QR estimator evaluated along
+  \caption{\textbf{Historical, pre-correction.} The acrobot uses the retired velocity-state integrator. Learned versus true $\lambda_1$, both from the same Benettin/QR estimator evaluated along
   the true orbit. The integrable pendulum sits on the $y=x$ line (both $\lambda_1\approx0$); the
   chaotic acrobot lies far above it---learned $3.45\,\mathrm{s}^{-1}$ versus true
   $1.04\,\mathrm{s}^{-1}$, an over-amplification of $3.3\times$. Next-step accuracy does not imply the
@@ -592,81 +526,88 @@ it.
   \label{fig:lyap-scatter}
 \end{figure}
 
-\subsection{Why next-step training cannot see \texorpdfstring{$\lambda_1$}{lambda1}}\label{sec:B-mechanism}
+\FloatBarrier
+\subsection{Why next-step error does not certify sensitivity}\label{sec:B-mechanism}
 
-The failure in Section~\ref{sec:B-lyap} has a precise cause. Next-step mean-squared error penalises
-$\norm{g_\phi(x_t)-x_{t+1}}^2$ at the training states: it supervises \emph{where} points are mapped.
-But $\lambda_1$ is a property of the \emph{Jacobian} $\partial g_\phi/\partial x$, which governs how
-infinitesimal perturbations are stretched, and next-step error never targets a derivative. With finite
-data and finite capacity a model can drive its pointwise error low while its Jacobian---constrained by
-no derivative target---remains substantially wrong. The threefold over-amplification of
-Section~\ref{sec:B-lyap} is exactly that gap made visible: the network reproduces the trajectory well
-yet equips it with the wrong sensitivity.
-
-There is a sharper way to name what is missing. The true dynamics are Hamiltonian, and in canonical
-coordinates they conserve phase-space volume exactly---the Lyapunov spectrum sums to zero
-(Eq.~\eqref{eq:sum-rule}). That volume law is a structural fingerprint of genuine mechanics, yet it is a
-property of the Jacobian's \emph{determinant}---once more, the object next-step regression never
-touches---so a pointwise learner has no route to discover it. We read this fidelity off the
-coordinate-invariant exponent $\lambda_1$ rather than a raw volume sum, since the volume law is exact
-only in the canonical $(\theta,p)$ frame and not the $(\theta,\omega)$ coordinates the model is fit in.
-The same reasoning points to the remedy: rather than hope training stumbles onto the right Jacobian,
-build the structure in. Section~\ref{sec:B-structure} does exactly this, contrasting a soft penalty
-that \emph{asks} for volume preservation with a symplectic architecture that \emph{guarantees} it.
+Next-step mean-squared error supervises mapped states, not their derivatives directly.
+With finite data, low prediction error therefore does not by itself certify the
+Jacobian products used by the sensitivity diagnostic. It also does not prevent a
+learner from recovering good derivatives; these are separate quantities to measure.
+Volume preservation constrains the sum of exponents, not the largest exponent alone.
+A symplectic model can have the wrong $\lambda_1$, and a nonsymplectic model can match it.
+The corrected study uses the same canonical coordinates for all models and the
+reference, avoiding finite-window coordinate changes in this comparison.
 
 \subsection{Structure-preserving world models}\label{sec:B-structure}
 
-Section~\ref{sec:B-mechanism} argued that the cure is to build the missing structure into the model
-rather than hope training discovers it. We test this on the chaotic acrobot with three world models
-that impose volume structure with increasing force. The first is the plain MLP of
-Sections~\ref{sec:B-model}--\ref{sec:B-mechanism}, with no constraint. The second is a
-\emph{volume-penalty} MLP, which adds to the next-step loss a soft penalty
-$\bigl(\log\lvert\det\,\partial g_\phi/\partial x\rvert\bigr)^2$ pulling the one-step Jacobian toward
-unit determinant---an explicit \emph{request} for volume preservation. The third is a
-\emph{Hamiltonian neural network} (HNN), which builds it in structurally, through a symplectic
-integration step.
+We compare a residual MLP, an MLP with penalty
+$\mu(\log|\det Dg_\phi|)^2$, and a Hamiltonian neural network (HNN).
+The HNN learns $H_\phi(q,p)$ with periodic angle embeddings and uses implicit midpoint;
+its ideal step is symplectic. Training uses midpoint Hamiltonian-gradient targets.
+The finite-iteration implementation and analytic midpoint Jacobian are checked
+separately; the structural constraint does not guarantee a correct largest exponent.
 
-The HNN is the structurally honest model. It learns a scalar Hamiltonian $H_\phi(q,p)$ on canonical
-coordinates ($q=\theta$, $p=M(\theta)\,\omega$, with $M$ the mass matrix), forms the Hamiltonian flow
-$\dot q=\partial H/\partial p$, $\dot p=-\partial H/\partial q$, and advances it with a symplectic Euler
-step; angles enter through a $(\cos\theta,\sin\theta)$ embedding to respect the circle topology. For
-the acrobot's non-separable Hamiltonian this step is volume-preserving to $O(dt^2)$---its Jacobian has
-unit determinant up to that order---so the model conserves phase-space volume essentially by
-construction, not by training; measured along the canonical image of the true orbit, its spectrum sums
-to $0.001\,\mathrm{s}^{-1}$, against the true zero. Because $\lambda_1$ is coordinate-invariant, that
-same canonical evaluation gives a value directly comparable to the true $(\theta,\omega)$ exponent.
+The committed \texttt{writeup/figures/partb\_ablation.json} contains 40 measurements:
+eight conditions at training seeds $0$--$4$, all with dataset seed $0$.
+Each dataset contains 80 trajectories of 2000 steps. The MLPs train for 120 epochs
+and the HNNs for 200, with Adam (learning rate $10^{-3}$, batch size 256).
+This compares the existing model protocols, not equal training-compute budgets.
+Each exponent averages eight QR initialisations with $k=4$ over 54 seconds,
+$dt=0.0005$ seconds, after discarding 1200 trajectory steps (0.6 seconds)
+from 109200 steps beginning at canonical state $(2.5,0,0,0)$.
+All learned Jacobians are evaluated along this \emph{reference simulator trajectory},
+not autonomous learned-model rollouts. These are finite-time tangent-growth diagnostics
+along a common itinerary. The matching reference is $1.11634\,\mathrm{s}^{-1}$;
+its full QR-initialisation range is $0.07296\,\mathrm{s}^{-1}$.
 
-Figure~\ref{fig:structured} reports the learned $\lambda_1$ of each model against the true acrobot
-exponent ($\approx 1.14\,\mathrm{s}^{-1}$ on this orbit). The two MLPs over-amplify, as in
-Section~\ref{sec:B-lyap}: the plain MLP gives $2.47\,\mathrm{s}^{-1}$ and the volume-penalty MLP
-$3.02\,\mathrm{s}^{-1}$---the soft penalty does not close the gap, and here is no better than no penalty
-at all. Only the HNN lands near the truth, at $0.87\,\mathrm{s}^{-1}$: the sole model that does not
-manufacture spurious sensitivity. The lesson is that the constraint must be hard---\emph{asking} for
-volume preservation through a penalty is not enough, while \emph{guaranteeing} it through a symplectic
-architecture is.
+\begin{table}[ht]\centering
+\begin{tabular}{lrr}
+\toprule
+Condition & Median $\lambda_1$ & Training-seed min--max \\
+\midrule
+A: corrected data, midpoint HNN & 0.9871 & 0.9504--1.0280 \\
+B: corrected data, retired HNN step & 0.9887 & 0.9513--1.0264 \\
+C: retired data, midpoint HNN & 0.9922 & 0.8717--1.0155 \\
+D: retired data, retired HNN step & 0.9915 & 0.8742--1.0146 \\
+Plain MLP & 1.2790 & 1.0035--1.6348 \\
+Penalty MLP, $\mu=0.1$ & 1.9996 & 1.3741--3.3772 \\
+Penalty MLP, $\mu=1$ & 2.3108 & 2.0562--2.5441 \\
+Penalty MLP, $\mu=10$ & 1.2280 & 0.8889--1.5178 \\
+\bottomrule
+\end{tabular}
+\caption{Saved study, all rates in $\mathrm{s}^{-1}$ under the shared 54-second protocol.
+Ranges vary training seed only and are not confidence intervals. B reuses A's weights;
+D reuses C's weights. Retired training trajectories are mapped into canonical coordinates.}
+\label{tab:partb-study}
+\end{table}
 
-\begin{figure}[t]\centering
-  \includegraphics[width=0.75\linewidth]{fig7.png}
-  \caption{Learned $\lambda_1$ on the chaotic acrobot for three world models, against the true exponent
-  (dashed, $\approx 1.14\,\mathrm{s}^{-1}$). The unconstrained MLP ($2.47\,\mathrm{s}^{-1}$) and the
-  soft volume-penalty MLP ($3.02\,\mathrm{s}^{-1}$) over-amplify; only the symplectic HNN
-  ($0.87\,\mathrm{s}^{-1}$), volume-preserving by construction, lands near the truth---undershooting by
-  about $24\%$. Only a hard structural constraint recovers $\lambda_1$.}
+The penalty weight $\mu=10$ was selected from $\{0.1,1,10\}$ by median proximity
+to the reference on this evaluation. It is not an independently validated optimum.
+Its median is slightly closer to the reference than the HNN's, while the HNN has a
+much smaller observed training-seed range ($0.0776$ versus $0.6289\,\mathrm{s}^{-1}$).
+This supports stability across the tested training initialisations, not a claim that
+only a hard constraint recovers sensitivity.
+
+\begin{figure}[htbp]\centering
+  \includegraphics[width=0.85\linewidth]{fig7.png}
+  \caption{Saved five-seed study: median and min--max of plain MLP, selected
+  penalty MLP ($\mu=10$), and corrected midpoint HNN, with matching reference
+  $1.11634\,\mathrm{s}^{-1}$. Protocol: 54 seconds, $dt=0.0005$ seconds,
+  eight QR frames, $k=4$, canonical $(2.5,0,0,0)$; learned Jacobians follow
+  the reference trajectory. Whiskers reflect training seeds, not confidence intervals.}
   \label{fig:structured}
 \end{figure}
 
-The win is qualified. The HNN recovers the right magnitude and the volume structure, but it undershoots
-the true exponent by about $24\%$ ($0.87$ against $1.14\,\mathrm{s}^{-1}$). Structure preservation is
-therefore necessary but not, on its own, sufficient for an exact match---a gap we leave to the
-Limitations (Section~\ref{sec:limitations}), along with the finite-time, single-seed, and integrator
-dependence of these estimates, the true reference itself included.
+The ablation shifts are small relative to the predeclared reporting thresholds:
+B--A is $+0.0016$ against $0.0776$, and C--A is $+0.0051$ against $0.1438$
+(all $\mathrm{s}^{-1}$). Each threshold is the larger full training-seed range
+of the two compared conditions. Neither effect exceeds its threshold, so no
+quantitative decomposition panel is shown. The additivity residual is $0.0023$,
+within the $0.1403$ tolerance (the larger A/D range); this does not prove exact
+additivity. Below-threshold effects are not proved zero, and the remaining HNN
+shortfall ($0.1293$) is not proved exclusively model error.
 
-Part~B thus mirrors Part~A under one exponent. Where Part~A showed that $\lambda_1$ bounds the gradients
-a correct simulator yields, Part~B shows that a learned world model is only as faithful as the
-$\lambda_1$ it reproduces---and that next-step accuracy does not deliver it. A model can predict the
-next state almost perfectly and still misjudge the chaotic sensitivity of the system it represents;
-$\lambda_1$ is the diagnostic that exposes the difference, and a structural prior is what repairs it.
-
+\FloatBarrier
 \section{Extensions}\label{sec:extensions}
 % Cosmos / world models; GR00T / action models; contact & stiff dynamics.
 The diagnostics here are deliberately demonstrated on low-dimensional, single-threaded CPU
@@ -680,8 +621,8 @@ gradient-gain slope, and the perturbed-rollout SNR---is a sweep or ensemble aver
 The outer loop over trajectories, seeds, and sweep points is therefore \emph{embarrassingly
 parallel} and maps directly onto the GPU---in the spirit of the thousands of parallel environments
 used for large-scale robot learning---with only the per-trajectory time-stepping remaining
-sequential. Re-implementing the Warp simulators on \textbf{Newton} (GPU; the production successor
-to the removed \texttt{warp.sim}) is the concrete path, and the prerequisite for everything below.
+sequential. A future GPU implementation could accelerate these sweeps; it is not a prerequisite
+for the present diagnostics or a small qualitative video-model demonstration.
 
 \item \textbf{Cosmos / large world models.} The Part-B fidelity test extends from our small
 surrogate to a large video world model such as \textbf{Cosmos}: does it preserve the physical
@@ -689,8 +630,8 @@ Lyapunov spectrum, or hallucinate (and wash out) sensitivity? The error-growth d
 (Section~\ref{sec:B-model}) transfers to pixel space as a qualitative probe; the full
 Lyapunov-fidelity diagnostic (Section~\ref{sec:B-lyap}) requires recovering physical state
 $(\theta,\omega)$ from generated video---a perception front-end---or a latent-space tangent-vector
-adaptation, both research problems rather than a front-end swap, and both demanding GPU-scale
-compute.
+adaptation, both research problems rather than a front-end swap. These quantitative extensions
+are distinct from a small qualitative comparison of generated videos.
 
 \item \textbf{GR00T / action models.} For a closed-loop policy such as \textbf{GR00T}, the natural
 robustness diagnostic is the finite-time Lyapunov exponent of the observation\,$\to$\,action%
@@ -705,7 +646,16 @@ differentiable-simulator gradients most often break in practice.
 
 \section{Limitations}\label{sec:limitations}
 % honest caveats (single seed, finite-time estimates, integrator/dt dependence, ...).
-\emph{[To be written.]}
+All reported exponents are finite-window estimates. Window length, QR initialisation,
+coordinates, discretisation and initial state matter; this study does not establish
+asymptotic convergence for every condition. The five-seed model comparison holds the
+dataset fixed and does not measure data-sampling variation. Penalty selection reuses
+the evaluation, and reference-itinerary Jacobians do not establish autonomous-rollout
+fidelity. Volume preservation alone cannot determine the largest exponent.
+The optimisation comparison uses one fixed optimiser budget and does not establish a
+universal impossibility boundary. The explicitly historical figures use an obsolete
+acrobot implementation. These low-dimensional CPU results do not validate Cosmos,
+video world models, GPU performance, or real-robot behaviour.
 
 \appendix
 
@@ -743,9 +693,8 @@ with diagonal equal to the product of diagonals,
 \ln(\mathcal{R}_N)_{ii}=\sum_{t=1}^{N}\ln R^{(t)}_{ii},
 \label{eq:logsum}
 \end{equation}
-converting the overflow-prone matrix product into the additive running sum the estimator
-accumulates---the entire numerical reason for re-orthonormalising at every step rather
-than forming $M_N$ once.
+This replaces the overflow-prone product with an additive running sum, explaining
+why we re-orthonormalise at every step instead of forming $M_N$ once.
 
 Second, $Q^{(N)}$ has orthonormal columns and is therefore an isometry:
 $\norm{Q^{(N)}x}=\norm{x}$, its singular values are all one, $\norm{Q^{(N)}}=1$, and so

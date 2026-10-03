@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -178,12 +179,10 @@ def _geomean_band(seeds_per_horizon: list[list[float]]) -> tuple[Any, Any, Any]:
 def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
     """One-panel Fig 2: normalized final cost vs horizon T·λ₁ for three trajectory-optimisation settings.
 
-    Cost = final / do-nothing-baseline (≪1 succeeds; ≥1 no better than doing nothing), geometric-mean
-    over reach targets with a 10-90% band. The acrobot's *precise* reach rises through the
-    do-nothing baseline at the predictability horizon (the §4.3 horizon with its log factor) and blows
-    up beyond it (e^{2λ₁T} gradient gain); the *forgiving* swing-up and the *integrable* pendulum's
-    precise reach stay far below the baseline at every horizon. All curves share the acrobot's
-    Lyapunov axis at matched step counts.
+    Cost = final / do-nothing-baseline, geometric mean with a 10-90% band.
+    This fixed-budget comparison measures horizon dependence; it does not establish
+    a universal cutoff or distinguish optimiser limitations from intrinsic sensitivity.
+    All curves share the acrobot's Lyapunov axis at matched step counts.
     """
     acro = SYSTEMS["acrobot"]
     pend = SYSTEMS["pendulum"]
@@ -221,7 +220,7 @@ def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
     ax.set_xlabel(r"horizon $T\lambda_1$ (Lyapunov times)")
     ax.set_ylabel("final cost / do-nothing baseline")
     ax.set_title(
-        rf"Predictability horizon bounds precise diff-sim control ($\lambda_1={lam1:.2f}$/s)"
+        rf"Fixed-budget trajectory optimisation ($\lambda_1={lam1:.2f}$/s)"
     )
     ax.legend(loc="upper left", fontsize=9)
     fig.tight_layout()
@@ -676,79 +675,55 @@ def make_fig8_lambda_convergence(out: Path, fast: bool = False) -> Path:
     return out
 
 
-def make_fig7_structured_spectrum(out: Path, fast: bool = False) -> Path:
-    """Learned λ₁ vs the true acrobot exponent for the plain MLP, the volume-penalty MLP,
-    and the symplectic HNN.
+def make_fig7_structured_spectrum(
+    out: Path, fast: bool = False, *, results: Path | None = None
+) -> Path:
+    """Render the saved five-seed study; never train models.
 
-    λ₁ is coordinate-invariant, so the HNN (a canonical (q,p) map, measured along the
-    canonical image p=M(θ)ω of the true orbit) is directly comparable to the (θ,ω)-space
-    models and the true system. Only the hard symplectic constraint (HNN) brings λ₁ close
-    to true; the unconstrained MLP and the soft volume-penalty MLP over-amplify it. The
-    HNN is volume-preserving by construction (canonical det J = 1; the spectrum sum ≈ 0 is
-    verified in test_structured_models) — the structural reason it does not over-amplify.
-    We compare λ₁ (the coordinate-invariant exponent) rather than the spectrum sum, which
-    is coordinate-dependent and finite-time-noisy across these heterogeneous models.
+    ``fast`` is retained for the reproduction CLI and uses the same saved measurements.
+    ``results`` defaults to the committed JSON, independently of the output directory.
+    Whiskers are training-seed min/max, not confidence intervals. The penalty setting was
+    selected by median proximity to the reference in the tested sweep.
     """
-    from predictability_horizon.structured_models import (
-        hnn_spectrum_on_traj,
-        train_hnn,
-        train_volume_penalty_mlp,
-    )
-    from predictability_horizon.worldmodel import (
-        make_dataset,
-        model_lyapunov_on_traj,
-        train_world_model,
-    )
+    source = results or Path(__file__).resolve().parents[2] / "writeup/figures/partb_ablation.json"
+    try:
+        data = json.loads(source.read_text())
+        protocol = {
+            "dt": 0.0005, "n_steps": 109200, "transient_steps": 1200,
+            "window_s": 54.0, "qr_seeds": 8,
+        }
+        if any(data[key] != value for key, value in protocol.items()):
+            raise ValueError("expected the 54-second, eight-QR-frame study protocol")
+        labels = ["plain", "penalty:mu=10", "A"]
+        values = []
+        for label in labels:
+            runs = [r for r in data["runs"] if r["label"] == label]
+            if sorted(r["seed"] for r in runs) != list(range(5)):
+                raise ValueError(f"{label}: expected exactly training seeds 0 through 4")
+            values.append([float(r["lambda1"]) for r in runs])
+        reference = float(data["true_lambda1"])
+        if not np.isfinite(reference) or not np.all(np.isfinite(values)):
+            raise ValueError("non-finite lambda1 measurement")
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Cannot render Figure 7 from {source}: {exc}") from exc
 
-    s = SYSTEMS["acrobot"]
-    n_traj = 20 if fast else 80
-    t_data = 400 if fast else 2000
-    epochs = 15 if fast else 120
-    hnn_epochs = 15 if fast else 200
-    t_meas = 800 if fast else 12000
-    x0 = np.array([2.5, 0.0, 0.0, 0.0])
-
-    ds = make_dataset(s, n_traj=n_traj, T=t_data, seed=0)
-    base = train_world_model(ds, epochs=epochs, seed=0)
-    pen = train_volume_penalty_mlp(ds, epochs=epochs, penalty=1.0, seed=0)
-    hnn = train_hnn(ds, s.suggested_dt, epochs=hnn_epochs, seed=0)
-
-    true_traj = rollout(
-        cast(wp.Kernel, s.step_kernel),
-        x0,
-        np.zeros(t_meas),
-        s.default_params,
-        s.suggested_dt,
-        t_meas,
-    )[t_meas // 10 :]
-
-    def true_jac(st: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-        return cast(
-            npt.NDArray[np.float64],
-            s.jacobian(st, 0.0, s.default_params, s.suggested_dt),
-        )
-
-    true_lam = lyapunov_spectrum(true_jac, true_traj, dt=s.suggested_dt, k=1).largest
-    base_lam = model_lyapunov_on_traj(base, true_traj, dt=s.suggested_dt, k=1)
-    pen_lam = model_lyapunov_on_traj(pen, true_traj, dt=s.suggested_dt, k=1)
-    hnn_lam = hnn_spectrum_on_traj(hnn, true_traj, dt=s.suggested_dt, k=1).largest
-
-    names = ["MLP\n(no structure)", "vol-penalty\nMLP (soft)", "HNN\n(symplectic)"]
-    lams = [base_lam, pen_lam, hnn_lam]
-    colors = ["#d62728", "#ff7f0e", "#2ca02c"]
-
+    samples = np.asarray(values)
+    medians = np.median(samples, axis=1)
+    whiskers = np.stack((medians - samples.min(axis=1), samples.max(axis=1) - medians))
+    names = ["Plain MLP", "Volume-penalty MLP\nμ = 10 (selected)", "HNN\nimplicit midpoint"]
     fig, ax = plt.subplots(figsize=(7.2, 4.5))
-    ax.bar(names, lams, color=colors)
-    ax.axhline(true_lam, color="k", ls="--", lw=1.3, label=rf"true $\lambda_1$ ≈ {true_lam:.2f}/s")
-    ax.set_ylabel(r"learned $\lambda_1$  (/s)")
-    ax.set_title("Only the symplectic HNN recovers the chaotic acrobot's λ₁", fontsize=11)
-    ax.legend(fontsize=9)
+    ax.bar(names, medians, yerr=whiskers, capsize=6, color=["#d62728", "#ff7f0e", "#2ca02c"])
+    ax.axhline(reference, color="k", ls="--", lw=1.3,
+               label=rf"Reference $\lambda_1$ = {reference:.3f}/s")
+    ax.set_ylabel(r"Finite-time $\lambda_1$ along the reference orbit (/s)")
+    ax.set_title("HNN sensitivity varies less across the tested training seeds", fontsize=11)
+    ax.text(0.02, 0.97, "Median and min-max of 5 training seeds\n54 s · dt = 0.0005 s · 8 QR frames",
+            transform=ax.transAxes, va="top", fontsize=9)
+    ax.set_ylim(0, float(samples.max()) * 1.3)
+    ax.legend(loc="lower left", fontsize=9)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150)
     plt.close(fig)
-    print(
-        f"FIG7 lambda1 (/s): true={true_lam:+.3f}  MLP={base_lam:+.3f}  "
-        f"penalty={pen_lam:+.3f}  HNN={hnn_lam:+.3f}"
-    )
+    print(f"FIG7 saved study: reference={reference:.6f}; medians={medians.tolist()}")
     return out

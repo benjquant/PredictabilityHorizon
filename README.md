@@ -1,100 +1,84 @@
 # PredictabilityHorizon — Lyapunov exponents as predictability diagnostics
 
-The largest Lyapunov exponent λ₁ governs predictability in two pillars of Physical AI,
-and this repo measures both on differentiable robot-learning systems built in
-**NVIDIA Warp** (CPU).
+Sensitivity diagnostics for differentiable simulators and small learned world models,
+built with **NVIDIA Warp on CPU**. The corrected acrobot uses canonical momenta and
+implicit midpoint integration.
 
-![Gradient-gain vs horizon for pendulum and acrobot](writeup/figures/fig1.png)
+- **Gradient growth:** across 11 pendulum, acrobot, and Hénon–Heiles regimes, the
+  gradient-gain slope tracks the finite-time Lyapunov estimate (correlation 0.969,
+  regression slope 0.986; Figure 5).
+- **Trajectory optimisation:** Figure 2 compares precise reaching and forgiving
+  swing-up under a fixed optimiser budget. Acrobot reaching has geometric mean cost above the
+  zero-control baseline from four tested Lyapunov times onward; pendulum and swing-up
+  geometric means stay below it. This is not a universal optimisation cutoff.
+- **Learned sensitivity:** in the saved five-training-seed study, the HNN has a much
+  narrower range than the plain or tuned penalty MLP. The selected penalty model
+  has a slightly closer median to the reference. Structure does not guarantee exact
+  sensitivity recovery (Figure 7).
 
-**Part A — differentiable simulators.** The rollout's input–output Jacobian
-‖∂x_T/∂x₀‖₂ — the gradient gain reverse-mode autodiff propagates — grows as
-e^{λ₁T} (one factor of λ₁). So analytic simulator gradients are usable only for
-horizons T ≲ 1/λ₁. Verified to machine precision on a linear map; on the chaotic
-acrobot the measured gradient-gain rate is consistent with the independently-measured
-λ₁ to within finite-time scatter. A sweep across regimes (pendulum + acrobot energies)
-confirms the slope tracks λ₁ with correlation 0.99 (Fig. 5), and the T ≲ 1/λ₁ horizon
-is demonstrated directly via the analytic-gradient SNR (Fig. 6).
+![Five-seed sensitivity comparison](writeup/figures/fig7.png)
 
-**Part B — learned world models.** A small MLP world model reproduces an integrable
-system's near-zero Lyapunov exponent but **over-amplifies the chaotic one** (its learned
-λ₁ is ill-conditioned) — because a next-step-accuracy objective does not constrain the
-Jacobian/sensitivity structure (the learned dynamics break volume-preservation). A
-cautionary result for certifying the physical fidelity of large world models (e.g. Cosmos).
-Enforcing the conservation structure helps: a symplectic Hamiltonian world model preserves
-phase-space volume by construction and recovers λ₁ far closer to true than the plain or
-soft-penalized MLP (Fig. 7) — turning the cautionary finding constructive.
+The [paper](writeup/paper.pdf) is the public result summary, including protocols and
+limitations; the Introduction and Abstract remain drafts. Figures 2, 5, and 7 contain
+current evidence (these numbers identify the `figN.png` source files).
+Figures 1, 3, 4, 6, and 8 are explicitly historical and retain the
+retired velocity-state acrobot experiment. They do not validate the corrected simulator.
+These toy-system results do not establish Cosmos or real-robot performance.
 
-See `writeup/paper.pdf` for the full write-up — background, methods, and results for Parts A and B (draft in progress).
-
----
+The `acrobot-symplectic` branch is retained for an application link.
+[Main](https://github.com/benjquant/PredictabilityHorizon/tree/main) is the destination
+for subsequent development after integration.
 
 ## Install
 
 ```bash
 git clone https://github.com/benjquant/PredictabilityHorizon.git
 cd PredictabilityHorizon
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## Quickstart
+## Reproduce
 
-```python
-import numpy as np
-from predictability_horizon.gradient_law import gradient_law
-from predictability_horizon.systems import SYSTEMS, acrobot  # noqa: F401 (register)
-
-s = SYSTEMS["acrobot"]
-H = np.arange(1000, 9000, 1000)
-r = gradient_law(s.step_kernel, np.array([2.5, 0, 0, 0.0]),
-                 s.default_params, s.suggested_dt, H, 4, s.jacobian)
-print("gradient-gain slope /step:", r.slope_per_step)
-print("lambda_1 * dt        /step:", r.lambda1_per_step)
-```
-
-## CLI
+Render Figure 7 from the [committed measurements](writeup/figures/partb_ablation.json),
+without training or private files, from the installed repository checkout:
 
 ```bash
-predictability-horizon systems           # list the registered dynamical systems
-predictability-horizon reproduce         # regenerate all seven figures (world models + Part-A sweeps + structured-model comparison; ~35 min)
+python -c 'from pathlib import Path; from predictability_horizon.viz import make_fig7_structured_spectrum; make_fig7_structured_spectrum(Path("output/fig7.png"))'
+```
+
+The output directory can be changed independently of the input. The Python function
+also accepts `results=Path("path/to/partb_ablation.json")` for an explicit saved input.
+The plot uses medians and min–max ranges across five training seeds, with dataset seed
+fixed at 0. Measurements average eight QR initialisations (`k=4`) over 54 seconds at
+`dt=0.0005`, along the reference trajectory from canonical state `(2.5, 0, 0, 0)`.
+The penalty weight μ = 10 was selected from the tested sweep; ranges are not confidence
+intervals, and the measurements do not test autonomous learned-model rollouts.
+
+```bash
+predictability-horizon systems
 predictability-horizon reproduce --out path/to/output_dir
 ```
 
-## Tests
+Full reproduction runs all eight generators using the current code, including long
+optimisation sweeps and model training for Figures 3 and 4; Figure 7 only reads saved
+results. This is not a byte-for-byte recreation of the historical plots in the paper.
+
+## Validation
 
 ```bash
-pytest -m "not integration" -q   # fast subset (seconds); recommended for normal use
-pytest -q                        # full suite (20+ min; world-model training tests are @pytest.mark.integration)
+make lint
+make typecheck
+make test
+make calibration
 ```
 
-## Notebook
+The suite includes integration tests. For exploration, see
+[the quickstart notebook](notebooks/01_quickstart.ipynb).
+Registered systems are pendulum, acrobot, Hénon–Heiles, and cartpole; cartpole is not
+part of the paper's retained evidence.
 
-`notebooks/01_quickstart.ipynb` — runs the acrobot gradient-law inline and produces a local `fig1_demo.png`.
+## Citation and license
 
-## Figures
-
-| Figure | Description |
-|--------|-------------|
-| `writeup/figures/fig1.png` | Gradient-gain ‖∂x_T/∂x₀‖₂ vs horizon — slope tracks λ₁ for the chaotic acrobot, flat for the integrable pendulum |
-| `writeup/figures/fig2.png` | Acrobot trajectory optimisation: forgiving swing-up vs precise reaching, success vs horizon T·λ₁ |
-| `writeup/figures/fig3.png` | World-model prediction-error growth, integrable vs chaotic |
-| `writeup/figures/fig4.png` | Learned vs true λ₁ — the surrogate over-amplifies the chaotic exponent |
-| `writeup/figures/fig5.png` | Gradient-gain slope vs λ₁ across regimes (pendulum + acrobot energy sweep) — points track y=x, corr 0.99 |
-| `writeup/figures/fig6.png` | Analytic-gradient SNR vs Lyapunov time T·λ₁ — degrades through the predictability horizon |
-| `writeup/figures/fig7.png` | Learned λ₁ vs true for plain MLP, volume-penalty MLP, and symplectic HNN — only the hard structural constraint recovers it |
-
-## Systems
-
-| System | Dynamics | dim | λ₁ |
-|--------|----------|-----|----|
-| `pendulum` | integrable (single pendulum) | 2 | ≈ 0 |
-| `cartpole` | underactuated | 4 | — |
-| `acrobot` | chaotic (double pendulum) | 4 | > 0 |
-
-## Citation
-
-See `CITATION.cff`.
-
-## License
-
-MIT — see `LICENSE`.
+See [CITATION.cff](CITATION.cff) and the [MIT license](LICENSE).

@@ -33,8 +33,8 @@ def measure_lambda1(
     """Benettin/QR largest Lyapunov exponent (per unit time) on the passive trajectory from ``x0``.
 
     Rolls out ``t_phys`` seconds (default 8 s = ``round(t_phys / dt)`` steps), discards the
-    first ``transient_phys`` seconds (default 1 s) so the Benettin QR renormalisation has
-    settled onto the leading Oseledets direction, then averages the log-growth over the
+    first ``transient_phys`` seconds (default 1 s) of the trajectory, then initialises
+    the QR frame and averages the log-growth over the
     remaining ~7 s. ``t_phys`` is honoured exactly -- there is no internal step cap. This is
     not free: at the production ``dt=5e-4`` this is 16000 Jacobian evaluations (vs. 1600 at the
     coarse test ``dt=5e-3``). A previous ``min(8000, ...)`` cap silently halved the window at
@@ -133,7 +133,8 @@ def reach_ratio(
 ) -> float:
     """final/baseline ratio for a *feasible* target (built from a known control u_ref).
 
-    A zero-cost solution provably exists at every horizon, so any failure is gradient quality.
+    A zero-cost solution exists at every horizon; failure can reflect sensitivity or the
+    finite optimisation budget and does not prove the target unreachable.
     Ratio ≪ 1 = recovered; ≳ 1 = no better than doing nothing.
     """
     rng = np.random.default_rng(1000 + seed)
