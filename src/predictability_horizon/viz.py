@@ -179,10 +179,10 @@ def _geomean_band(seeds_per_horizon: list[list[float]]) -> tuple[Any, Any, Any]:
 def make_fig2_trajopt_horizon(out: Path, fast: bool = False) -> Path:
     """One-panel Fig 2: normalized final cost vs horizon T·λ₁ for three trajectory-optimisation settings.
 
-    Cost = final / do-nothing-baseline, geometric mean with a 10-90% band.
-    This fixed-budget comparison measures horizon dependence; it does not establish
-    a universal cutoff or distinguish optimiser limitations from intrinsic sensitivity.
-    All curves share the acrobot's Lyapunov axis at matched step counts.
+    Cost = final / do-nothing baseline, summarised by the geometric mean and a 10-90% band.
+    This fixed-budget comparison measures how optimisation performance changes with horizon
+    for precise reaching and forgiving swing-up. All curves share the acrobot's
+    Lyapunov-time axis at matched step counts.
     """
     acro = SYSTEMS["acrobot"]
     pend = SYSTEMS["pendulum"]

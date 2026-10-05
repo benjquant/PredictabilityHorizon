@@ -559,8 +559,8 @@ def summarise(result: AblationResult, mus: Sequence[float] = _MUS) -> Summary:
 def report_lines(result: AblationResult, summary: Summary) -> list[str]:
     """Human-readable summary, in the form the ledger entry wants.
 
-    Every lambda_1 carries its window and step size: a bare number is not a result, because
-    finite-window estimates depend on the measurement protocol.
+    Every λ₁ is reported with its measurement window and time step so comparisons use
+    the same temporal scale and numerical resolution.
     """
     proto = (
         f"window {result.window_s:.1f} s, dt = {result.dt:g}, "
