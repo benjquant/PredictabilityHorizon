@@ -719,7 +719,7 @@ def make_fig7_structured_spectrum(
     ax.set_title("HNN sensitivity varies less across the tested training seeds", fontsize=11)
     ax.text(0.02, 0.97, "Median and min-max of 5 training seeds\n54 s · dt = 0.0005 s · 8 QR frames",
             transform=ax.transAxes, va="top", fontsize=9)
-    ax.set_ylim(0, float(samples.max()) * 1.3)
+    ax.set_ylim(0, float(samples.ravel().max(axis=0)) * 1.3)
     ax.legend(loc="lower left", fontsize=9)
     fig.tight_layout()
     out.parent.mkdir(parents=True, exist_ok=True)
